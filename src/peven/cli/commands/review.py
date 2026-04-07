@@ -11,6 +11,7 @@ from rich.table import Table
 from peven.petri.render import render
 from peven.petri.store import get, list_runs
 
+
 console = Console()
 
 

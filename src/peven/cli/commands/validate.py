@@ -20,13 +20,13 @@ def validate(
         net, _, _ = load(file)
     except LoadError as e:
         typer.echo(str(e), err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     try:
         validate_net(net)
     except ValidationError as e:
         typer.echo(f"Validation failed: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     typer.echo("Valid.\n")
     render_net(net)

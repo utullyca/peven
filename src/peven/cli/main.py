@@ -6,6 +6,7 @@ from peven.cli.commands.review import review
 from peven.cli.commands.run import run
 from peven.cli.commands.validate import validate
 
+
 app = typer.Typer(
     name="peven",
     no_args_is_help=True,

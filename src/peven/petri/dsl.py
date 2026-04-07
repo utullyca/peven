@@ -14,7 +14,8 @@ Builder API with >> chaining that compiles to the Pydantic IR (Net).
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from peven.petri.schema import (
     Arc,
@@ -28,15 +29,16 @@ from peven.petri.schema import (
     TransitionConfig,
 )
 
+
 # -- Config helpers ------------------------------------------------------------
 
 
 def agent(
     model: str,
     prompt: str,
-    system: Optional[str] = None,
-    tools: Optional[list[Callable]] = None,
-    model_settings: Optional[dict[str, Any]] = None,
+    system: str | None = None,
+    tools: list[Callable] | None = None,
+    model_settings: dict[str, Any] | None = None,
 ) -> tuple[str, GenerateConfig]:
     """Create an agent executor config."""
     return (
@@ -70,7 +72,7 @@ def judge(
 class PlaceProxy:
     """Proxy for a place. Supports >> to create arcs."""
 
-    def __init__(self, builder: NetBuilder, id: str, capacity: Optional[int] = None):
+    def __init__(self, builder: NetBuilder, id: str, capacity: int | None = None):
         self._builder = builder
         self.id = id
         self.capacity = capacity
@@ -95,7 +97,7 @@ class TransitionProxy:
         builder: NetBuilder,
         id: str,
         executor: str,
-        config: Optional[TransitionConfig],
+        config: TransitionConfig | None,
         retries: int = 0,
     ):
         self._builder = builder
@@ -129,7 +131,7 @@ class NetBuilder:
         self._arcs: list[tuple[str, str, int]] = []
         self._tokens: dict[str, list[Token]] = {}
 
-    def place(self, id: str, capacity: Optional[int] = None) -> PlaceProxy:
+    def place(self, id: str, capacity: int | None = None) -> PlaceProxy:
         """Create a place."""
         p = PlaceProxy(self, id, capacity)
         self._places[id] = p

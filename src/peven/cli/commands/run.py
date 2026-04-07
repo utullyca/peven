@@ -24,7 +24,7 @@ def run(
         net, rows, place = load(file)
     except LoadError as e:
         typer.echo(str(e), err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     try:
         results = asyncio.run(
@@ -32,7 +32,7 @@ def run(
         )
     except Exception as e:
         typer.echo(f"Execution failed: {e}", err=True)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     run_id = save(results, file=file)
     typer.echo(f"Run {run_id}\n")

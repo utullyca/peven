@@ -11,7 +11,6 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
-from typing import Optional
 
 from peven.petri.schema import Net, Token
 
@@ -20,7 +19,7 @@ class LoadError(Exception):
     """Raised when the eval file can't be loaded or is missing required objects."""
 
 
-def load(path: str) -> tuple[Net, Optional[list[Token]], Optional[str]]:
+def load(path: str) -> tuple[Net, list[Token] | None, str | None]:
     """Import the file at *path* and extract net, rows, place."""
     p = Path(path).resolve()
     if not p.exists():

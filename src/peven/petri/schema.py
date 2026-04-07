@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Callable, Literal, Optional, Union
+from collections.abc import Callable
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag
 from pydantic_ai.models import Model
@@ -15,7 +16,7 @@ class ValidationError(ValueError):
 class Token(BaseModel):
     """Base token. A bare token is just a signal — subclass to carry data."""
 
-    run_id: Optional[str] = Field(default=None)
+    run_id: str | None = Field(default=None)
 
 
 # -- Transition configs --------------------------------------------------------
@@ -27,9 +28,9 @@ class GenerateConfig(BaseModel):
     type: Literal["generate"] = "generate"
     model: Union[str, Model] = Field(exclude=True)
     prompt_template: str
-    system_prompt: Optional[str] = Field(default=None)
-    tools: Optional[list[Callable]] = Field(default=None, exclude=True)
-    model_settings: Optional[dict[str, Any]] = Field(default=None)
+    system_prompt: str | None = Field(default=None)
+    tools: list[Callable] | None = Field(default=None, exclude=True)
+    model_settings: dict[str, Any] | None = Field(default=None)
 
 
 class JudgeConfig(BaseModel):
@@ -55,7 +56,7 @@ TransitionConfig = Annotated[
 
 class Place(BaseModel):
     id: str
-    capacity: Optional[int] = Field(default=None)
+    capacity: int | None = Field(default=None)
 
 
 class Transition(BaseModel):
@@ -63,8 +64,8 @@ class Transition(BaseModel):
 
     id: str
     executor: str
-    config: Optional[TransitionConfig] = Field(default=None)
-    when: Optional[Callable] = Field(default=None, exclude=True)
+    config: TransitionConfig | None = Field(default=None)
+    when: Callable | None = Field(default=None, exclude=True)
     retries: int = Field(
         default=0,
         description="Number of retry attempts after failure. "

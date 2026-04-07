@@ -5,12 +5,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from typing import Optional
 
 from peven.petri.executors import get
 from peven.petri.schema import Marking, Net, Token, Transition, ValidationError
 from peven.petri.types import GenerateOutput, JudgeOutput, RunResult, TransitionResult
 from peven.petri.validation import validate
+
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +37,8 @@ async def ready(
     marking: Marking,
     inputs: dict[str, list[tuple[str, int]]],
     failed: set[str],
-    in_flight: set[tuple[str, Optional[str]]],
-) -> list[tuple[Transition, Optional[str]]]:
+    in_flight: set[tuple[str, str | None]],
+) -> list[tuple[Transition, str | None]]:
     """Return (transition, run_id) pairs that can fire.
 
     Each transition is checked independently — parallel paths that never
@@ -48,7 +48,7 @@ async def ready(
 
     Guards can be sync or async callables (e.g. LLM judge gates).
     """
-    ready: list[tuple[Transition, Optional[str]]] = []
+    ready: list[tuple[Transition, str | None]] = []
 
     for t in net.transitions:
         arcs = inputs[t.id]
@@ -67,11 +67,11 @@ async def ready(
         #   → pro_argument sufficient: {"abc", "xyz"}
         #   → con_argument sufficient: {"abc"}
         #   → intersection: {"abc"} — only "abc" can fire, "xyz" is still waiting
-        candidates: Optional[set[Optional[str]]] = None
+        candidates: set[str | None] | None = None
         for place_id, weight in arcs:
             toks = marking.tokens.get(place_id, [])
             # Count tokens per run_id in this place
-            counts: dict[Optional[str], int] = {}
+            counts: dict[str | None, int] = {}
             for tok in toks:
                 counts[tok.run_id] = counts.get(tok.run_id, 0) + 1
             # Keep only run_ids with enough tokens to satisfy this arc
@@ -121,7 +121,7 @@ def consume(
     marking: Marking,
     transition: Transition,
     inputs: dict[str, list[tuple[str, int]]],
-    run_id: Optional[str],
+    run_id: str | None,
 ) -> tuple[Marking, list[Token], dict[str, list[Token]]]:
     """Remove input tokens for (transition, run_id) from marking.
 
@@ -158,7 +158,7 @@ def deposit(
     transition: Transition,
     outputs: dict[str, list[tuple[str, int]]],
     token: Token,
-    capacity: dict[str, Optional[int]],
+    capacity: dict[str, int | None],
 ) -> Marking:
     """Place output token into all output places. Returns new marking."""
     # Copy marking — mirror of consume
@@ -181,7 +181,7 @@ def deposit(
     return Marking(tokens=new_tokens)
 
 
-def _score(trace: list[TransitionResult]) -> Optional[float]:
+def _score(trace: list[TransitionResult]) -> float | None:
     """Extract score from the last judge result in a trace."""
     last = None
     for r in trace:
@@ -222,9 +222,9 @@ async def _execute(
     failed_run_ids: set[str] = set()
 
     sem = asyncio.Semaphore(max_concurrency)  # limit concurrent LLM calls
-    pending: dict[asyncio.Task, tuple[Transition, Optional[str], list[Token]]] = {}
-    in_flight: set[tuple[str, Optional[str]]] = set()  # so ready() skips these
-    retry_counts: dict[tuple[str, Optional[str]], int] = {}
+    pending: dict[asyncio.Task, tuple[Transition, str | None, list[Token]]] = {}
+    in_flight: set[tuple[str, str | None]] = set()  # so ready() skips these
+    retry_counts: dict[tuple[str, str | None], int] = {}
 
     # -- Spawn: check what's ready, consume tokens, kick off tasks ----------
     async def _spawn():
@@ -314,8 +314,8 @@ async def _execute(
 
 async def execute(
     net: Net,
-    rows: Optional[list[Token]] = None,
-    place: Optional[str] = None,
+    rows: list[Token] | None = None,
+    place: str | None = None,
     fuse: int = 1000,
     max_concurrency: int = 10,
 ) -> list[RunResult]:
@@ -341,7 +341,7 @@ async def execute(
     trace, failed = await _execute(net, fuse, max_concurrency)
 
     # Partition trace by run_id — works for single (run_id=None) and batch
-    by_rid: dict[Optional[str], list[TransitionResult]] = {}
+    by_rid: dict[str | None, list[TransitionResult]] = {}
     for r in trace:
         by_rid.setdefault(r.run_id, []).append(r)
 

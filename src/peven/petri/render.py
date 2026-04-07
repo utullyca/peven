@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
@@ -21,7 +19,7 @@ def _status(value: str) -> Text:
     return Text(value)
 
 
-def _score_text(score: Optional[float]) -> str:
+def _score_text(score: float | None) -> str:
     if score is None:
         return "—"
     return f"{score:.4f}"
@@ -83,7 +81,7 @@ def _trace_tree(result: RunResult) -> Tree:
 def render(
     results: list[RunResult],
     trace: bool = False,
-    console: Optional[Console] = None,
+    console: Console | None = None,
 ) -> None:
     """Render run results to the terminal.
 
@@ -138,7 +136,7 @@ def render(
             con.print()
 
 
-def render_net(net: Net, console: Optional[Console] = None) -> None:
+def render_net(net: Net, console: Console | None = None) -> None:
     """Render the net topology as a tree."""
     con = console or Console()
 

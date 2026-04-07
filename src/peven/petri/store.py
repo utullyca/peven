@@ -11,9 +11,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from peven.petri.types import (
     GenerateOutput,
@@ -23,6 +22,7 @@ from peven.petri.types import (
     StoredRun,
     TransitionResult,
 )
+
 
 _DB_DIR = Path.home() / ".peven"
 _DB_PATH = _DB_DIR / "runs.db"
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS transitions (
 """
 
 
-def _connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
+def _connect(db_path: Path | None = None) -> sqlite3.Connection:
     path = db_path or _DB_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
@@ -72,12 +72,12 @@ def _connect(db_path: Optional[Path] = None) -> sqlite3.Connection:
 
 def save(
     results: list[RunResult],
-    file: Optional[str] = None,
-    db_path: Optional[Path] = None,
+    file: str | None = None,
+    db_path: Path | None = None,
 ) -> str:
     """Persist run results. Returns the run ID."""
     run_id = uuid.uuid4().hex[:12]
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
     failed = any(r.status == "failed" for r in results)
     scores = [r.score for r in results if r.score is not None]
@@ -135,7 +135,7 @@ def save(
     return run_id
 
 
-def get(run_id: str, db_path: Optional[Path] = None) -> Optional[StoredRun]:
+def get(run_id: str, db_path: Path | None = None) -> StoredRun | None:
     """Fetch a run by ID with all results and transitions."""
     conn = _connect(db_path)
     try:
@@ -205,7 +205,7 @@ def get(run_id: str, db_path: Optional[Path] = None) -> Optional[StoredRun]:
     )
 
 
-def list_runs(limit: Optional[int] = 20, db_path: Optional[Path] = None) -> list[RunSummary]:
+def list_runs(limit: int | None = 20, db_path: Path | None = None) -> list[RunSummary]:
     """List recent runs, newest first. Pass limit=None for all."""
     conn = _connect(db_path)
     try:

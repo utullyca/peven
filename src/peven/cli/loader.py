@@ -1,4 +1,4 @@
-"""Load a Net from a Python eval file by convention.
+"""Load a Net from a trusted Python eval file by convention.
 
 Discovers:
     net   — required, a Net instance
@@ -20,7 +20,7 @@ class LoadError(Exception):
 
 
 def load(path: str) -> tuple[Net, list[Token] | None, str | None]:
-    """Import the file at *path* and extract net, rows, place."""
+    """Import and execute a trusted eval file, then extract net, rows, place."""
     p = Path(path).resolve()
     if not p.exists():
         raise LoadError(f"File not found: {path}")

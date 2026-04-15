@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -24,20 +24,38 @@ class JudgeOutput(Token):
     report: list[CriterionReport] | None = Field(default=None)
 
 
+class TokenSnapshot(Token):
+    """Stored representation for custom token outputs."""
+
+    type_name: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
 # -- Results -------------------------------------------------------------------
+
+RunStatus = Literal["completed", "failed", "incomplete"]
+TerminalReason = Literal[
+    "completed",
+    "executor_failed",
+    "guard_error",
+    "missing_score",
+    "no_enabled_transition",
+    "fuse_exhausted",
+]
 
 
 class TransitionResult(BaseModel):
     transition_id: str
     status: Literal["completed", "failed"]
-    output: GenerateOutput | JudgeOutput | None = Field(default=None)
+    output: Token | None = Field(default=None)
     error: str | None = Field(default=None)
     run_id: str | None = Field(default=None)
 
 
 class RunResult(BaseModel):
     run_id: str | None = Field(default=None)
-    status: Literal["completed", "failed"] = Field(default="completed")
+    status: RunStatus = Field(default="completed")
+    terminal_reason: TerminalReason | None = Field(default=None)
     score: float | None = Field(default=None)
     error: str | None = Field(default=None)
     trace: list[TransitionResult] = Field(default_factory=list)
@@ -52,7 +70,7 @@ class StoredRun(BaseModel):
     id: str
     timestamp: str
     file: str | None = Field(default=None)
-    status: Literal["completed", "failed"]
+    status: RunStatus
     score: float | None = Field(default=None)
     error: str | None = Field(default=None)
     result_count: int
@@ -65,6 +83,6 @@ class RunSummary(BaseModel):
     id: str
     timestamp: str
     file: str | None = Field(default=None)
-    status: Literal["completed", "failed"]
+    status: RunStatus
     score: float | None = Field(default=None)
     result_count: int

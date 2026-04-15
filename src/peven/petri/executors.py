@@ -12,11 +12,20 @@ from rubric import Rubric
 
 
 def _extract_text(tokens: list[Token]) -> str:
-    """Pull text from the first GenerateOutput token."""
+    """Render text from every textual input token in order."""
+    texts: list[str] = []
     for token in tokens:
         if isinstance(token, GenerateOutput):
-            return token.text
-    return ""
+            texts.append(token.text)
+            continue
+        text = getattr(token, "text", None)
+        if isinstance(text, str):
+            texts.append(text)
+    if not texts:
+        return ""
+    if len(texts) == 1:
+        return texts[0]
+    return "\n\n".join(texts)
 
 
 # -- Protocol ------------------------------------------------------------------

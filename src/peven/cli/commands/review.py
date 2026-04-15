@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Annotated
 
 import typer
@@ -13,6 +14,13 @@ from peven.petri.store import get, list_runs
 
 
 console = Console()
+_ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+
+
+def _safe_cell(value: str) -> str:
+    text = _ANSI_ESCAPE_RE.sub("", value)
+    text = "".join(ch if ch.isprintable() or ch.isspace() else " " for ch in text)
+    return " ".join(text.split())
 
 
 def review(
@@ -50,12 +58,14 @@ def _list_all(limit: int | None):
     table.add_column("Results", justify="right")
 
     for r in runs:
-        status_style = "green" if r.status == "completed" else "red"
+        status_style = (
+            "green" if r.status == "completed" else ("red" if r.status == "failed" else "yellow")
+        )
         score = f"{r.score:.2f}" if r.score is not None else "—"
         table.add_row(
-            r.id,
-            r.timestamp.replace("T", " ").split(".")[0],
-            r.file or "—",
+            _safe_cell(r.id),
+            _safe_cell(r.timestamp.replace("T", " ").split(".")[0]),
+            _safe_cell(r.file or "—"),
             f"[{status_style}]{r.status}[/{status_style}]",
             score,
             str(r.result_count),
@@ -70,6 +80,6 @@ def _show_run(run_id: str, trace: bool):
         typer.echo(f"Run {run_id} not found.", err=True)
         raise typer.Exit(1)
 
-    ts = data.timestamp.replace("T", " ").split(".")[0]
-    typer.echo(f"Run {data.id}  |  {ts}  |  {data.file or '—'}\n")
+    ts = _safe_cell(data.timestamp.replace("T", " ").split(".")[0])
+    typer.echo(f"Run {_safe_cell(data.id)}  |  {ts}  |  {_safe_cell(data.file or '—')}\n")
     render(data.results, trace=trace)

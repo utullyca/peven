@@ -11,6 +11,7 @@ def validate(net: Net) -> None:
     transition_ids = {t.id for t in net.transitions}
 
     id_uniqueness(net.places, net.transitions)
+    score_transition_validity(net.score_transition_id, transition_ids)
     arc_integrity(net.arcs, place_ids, transition_ids)
     arc_directionality(net.arcs, place_ids, transition_ids)
     marking_validity(net.initial_marking, net.places)
@@ -28,6 +29,14 @@ def id_uniqueness(places: list[Place], transitions: list[Transition]) -> None:
         if transition.id in seen:
             raise ValidationError(f"Duplicate ID: {transition.id!r}")
         seen.add(transition.id)
+
+
+def score_transition_validity(score_transition_id: str | None, transition_ids: set[str]) -> None:
+    """score_transition_id must point at an existing transition when set."""
+    if score_transition_id is None:
+        return
+    if score_transition_id not in transition_ids:
+        raise ValidationError(f"Unknown score transition: {score_transition_id!r}")
 
 
 def arc_integrity(arcs: list[Arc], place_ids: set[str], transition_ids: set[str]) -> None:

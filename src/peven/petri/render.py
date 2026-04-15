@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
+import json
+import re
+
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
 from peven.petri.schema import Net
-from peven.petri.types import GenerateOutput, JudgeOutput, RunResult, TransitionResult
+from peven.petri.types import (
+    GenerateOutput,
+    JudgeOutput,
+    RunResult,
+    TokenSnapshot,
+    TransitionResult,
+)
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 
 
 def _status(value: str) -> Text:
@@ -16,6 +27,8 @@ def _status(value: str) -> Text:
         return Text(value, style="green")
     if value == "failed":
         return Text(value, style="red")
+    if value == "incomplete":
+        return Text(value, style="yellow")
     return Text(value)
 
 
@@ -25,34 +38,68 @@ def _score_text(score: float | None) -> str:
     return f"{score:.4f}"
 
 
+def _sanitize_text(text: str) -> str:
+    text = _ANSI_ESCAPE_RE.sub("", text)
+    return "".join(ch if ch.isprintable() or ch.isspace() else " " for ch in text)
+
+
 def _truncate(text: str, length: int = 60) -> str:
+    text = _sanitize_text(text)
     text = " ".join(text.split())
     if len(text) > length:
         return text[: length - 1] + "…"
     return text
 
 
+def _generic_output_summary(token) -> str:
+    """Compact summary for non-built-in token outputs."""
+    if isinstance(token, TokenSnapshot):
+        payload = {k: v for k, v in token.payload.items() if k != "run_id"}
+        text = payload.get("text")
+        if isinstance(text, str):
+            return _truncate(text)
+        body = json.dumps(payload, sort_keys=True, default=str) if payload else ""
+        return _truncate(f"{token.type_name} {body}".strip())
+
+    text = getattr(token, "text", None)
+    if isinstance(text, str):
+        return _truncate(text)
+
+    payload = token.model_dump(mode="json")
+    payload.pop("run_id", None)
+    body = json.dumps(payload, sort_keys=True, default=str) if payload else ""
+    return _truncate(f"{type(token).__name__} {body}".strip())
+
+
 def _output_summary(tr: TransitionResult) -> str:
     """One-line summary of a transition result's output."""
     if tr.error:
-        return tr.error
+        return _truncate(tr.error)
     if isinstance(tr.output, JudgeOutput):
         return f"score={_score_text(tr.output.score)}"
     if isinstance(tr.output, GenerateOutput):
         return _truncate(tr.output.text)
+    if tr.output is not None:
+        return _generic_output_summary(tr.output)
     return "—"
 
 
 def _trace_tree(result: RunResult) -> Tree:
     """Build a Rich tree for a single run's trace."""
-    rid = result.run_id or "single"
+    rid = _sanitize_text(result.run_id or "single")
     score_part = f" ({_score_text(result.score)})" if result.score is not None else ""
+    reason_part = (
+        f" [{result.terminal_reason}]"
+        if result.terminal_reason and result.terminal_reason != "completed"
+        else ""
+    )
     label = Text.assemble(
         "Run ",
         Text(rid, style="bold"),
         " — ",
         _status(result.status),
         score_part,
+        Text(reason_part, style="dim"),
     )
     tree = Tree(label)
     for tr in result.trace:
@@ -71,8 +118,8 @@ def _trace_tree(result: RunResult) -> Tree:
                 v_style = "green" if cr.verdict == "MET" else "red"
                 cr_label = Text.assemble(
                     Text(cr.verdict, style=v_style),
-                    f"  {cr.requirement}",
-                    Text(f"  ({cr.reason})", style="dim"),
+                    f"  {_sanitize_text(cr.requirement)}",
+                    Text(f"  ({_sanitize_text(cr.reason)})", style="dim"),
                 )
                 branch.add(cr_label)
     return tree
@@ -118,14 +165,18 @@ def render(
     # Stats line
     total = len(results)
     completed = sum(1 for r in results if r.status == "completed")
-    failed = total - completed
-    scores = [r.score for r in results if r.score is not None]
+    failed = sum(1 for r in results if r.status == "failed")
+    incomplete = total - completed - failed
+    scores = [r.score for r in results if r.status == "completed" and r.score is not None]
     mean = sum(scores) / len(scores) if scores else None
     parts = [f"{total} runs", f"{completed} completed"]
     if failed:
         parts.append(f"{failed} failed")
+    if incomplete:
+        parts.append(f"{incomplete} incomplete")
     if mean is not None:
-        parts.append(f"mean: {mean:.4f}")
+        label = "mean" if completed == total else "completed mean"
+        parts.append(f"{label}: {mean:.4f}")
     con.print(f"[dim]{' · '.join(parts)}[/dim]")
 
     # Per-run traces

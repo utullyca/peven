@@ -5,10 +5,17 @@ from __future__ import annotations
 from io import StringIO
 
 from rich.console import Console
+from rubric import CriterionReport
 
+from peven.petri.schema import Token
 from peven.petri.dsl import NetBuilder, agent, judge
 from peven.petri.render import _status, render, render_net
-from peven.petri.types import GenerateOutput, JudgeOutput, RunResult, TransitionResult
+from peven.petri.types import GenerateOutput, JudgeOutput, RunResult, TokenSnapshot, TransitionResult
+
+
+class CustomToken(Token):
+    text: str
+    step: int
 
 
 def _console() -> tuple[Console, StringIO]:
@@ -91,6 +98,37 @@ def test_render_batch_shows_table():
     assert "0.8500" in out  # mean of 0.9 and 0.8
 
 
+def test_render_completed_mean_excludes_scored_failures():
+    """The aggregate mean should only use completed runs."""
+    con, buf = _console()
+    results = [
+        RunResult(
+            run_id="r1",
+            status="completed",
+            score=0.9,
+            trace=[],
+        ),
+        RunResult(
+            run_id="r2",
+            status="failed",
+            score=0.1,
+            error="boom",
+            trace=[],
+        ),
+        RunResult(
+            run_id="r3",
+            status="incomplete",
+            score=0.2,
+            error="stuck",
+            trace=[],
+        ),
+    ]
+    render(results, console=con)
+    out = buf.getvalue()
+    assert "completed mean:" in out
+    assert "0.9000" in out
+
+
 def test_render_batch_with_trace():
     """trace=True shows per-run traces after the table."""
     con, buf = _console()
@@ -137,6 +175,23 @@ def test_render_failed_trace():
     out = buf.getvalue()
     assert "✗" in out
     assert "exploded" in out
+
+
+def test_render_incomplete_trace():
+    """Incomplete runs show status and terminal reason."""
+    con, buf = _console()
+    results = [
+        RunResult(
+            status="incomplete",
+            terminal_reason="fuse_exhausted",
+            error="Execution stopped after reaching fuse=3",
+            trace=[],
+        )
+    ]
+    render(results, console=con)
+    out = buf.getvalue()
+    assert "incomplete" in out
+    assert "fuse_exhausted" in out
 
 
 def test_render_truncates_long_text():
@@ -197,6 +252,80 @@ def test_render_judge_rubric_breakdown():
     assert "UNMET" in out, "should show UNMET verdict"
     assert "clear writing" in out, "should show requirement text"
     assert "wrong date" in out, "should show reason"
+
+
+def test_render_custom_token_output():
+    """Custom token outputs should render a compact summary."""
+    con, buf = _console()
+    results = [
+        RunResult(
+            status="completed",
+            trace=[
+                TransitionResult(
+                    transition_id="env",
+                    status="completed",
+                    output=CustomToken(text="room A", step=2),
+                ),
+                TransitionResult(
+                    transition_id="stored",
+                    status="completed",
+                    output=TokenSnapshot(
+                        type_name="demo.RoomState",
+                        payload={"text": "room B", "step": 3},
+                    ),
+                ),
+            ],
+        )
+    ]
+    render(results, console=con)
+    out = buf.getvalue()
+    assert "room A" in out
+    assert "room B" in out
+
+
+def test_render_strips_terminal_escape_sequences():
+    """Untrusted text should not render raw terminal escape sequences."""
+    con, buf = _console()
+    results = [
+        RunResult(
+            run_id="r1\x1b[31m",
+            status="failed",
+            error="\x1b[31mboom\x1b[0m",
+            trace=[
+                TransitionResult(
+                    transition_id="gen",
+                    status="failed",
+                    error="\x1b[32mbad\x1b[0m",
+                ),
+                TransitionResult(
+                    transition_id="judge",
+                    status="completed",
+                    output=JudgeOutput(
+                        score=0.5,
+                        report=[
+                            CriterionReport(
+                                weight=1.0,
+                                requirement="clear\x1b[35m writing",
+                                verdict="MET",
+                                reason="looks \x1b[36mgood",
+                            )
+                        ],
+                    ),
+                )
+            ],
+        )
+    ]
+    render(results, trace=True, console=con)
+    out = buf.getvalue()
+    assert "\x1b[31mboom\x1b[0m" not in out
+    assert "\x1b[32mbad\x1b[0m" not in out
+    assert "\x1b[35m" not in out
+    assert "\x1b[36m" not in out
+    assert "boom" in out
+    assert "bad" in out
+    assert "r1" in out
+    assert "clear writing" in out
+    assert "looks good" in out
 
 
 # -- render_net() --------------------------------------------------------------

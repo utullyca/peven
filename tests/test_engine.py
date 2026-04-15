@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from peven.petri.engine import _trace_arcs, consume, deposit, execute, ready
+from peven.petri.executors import register
 from peven.petri.schema import (
     Arc,
     GenerateConfig,
@@ -45,6 +46,14 @@ def _mock_rubric_grade(score: float):
         return report
 
     return patch("peven.petri.executors.Rubric.grade", mock_grade)
+
+
+class SeqScoreExecutor:
+    def __init__(self, scores: list[float]):
+        self._scores = iter(scores)
+
+    async def execute(self, inputs, config):
+        return JudgeOutput(score=next(self._scores))
 
 
 def _simple_net():
@@ -373,6 +382,307 @@ async def test_run_fuse_limit():
         [result] = await execute(net, fuse=1, max_concurrency=2)
 
     assert len(result.trace) == 1
+    assert result.status == "incomplete"
+    assert result.terminal_reason == "fuse_exhausted"
+
+
+@pytest.mark.asyncio
+async def test_run_multiple_judges_without_designation_has_no_scalar_score():
+    """Multiple judge transitions require an explicit score transition."""
+    scores = iter([0.95, 0.3])
+
+    def _mock_rubric_grade_seq():
+        from rubric import CriterionReport, EvaluationReport
+
+        async def mock_grade(self, *a, **kw):
+            score = next(scores)
+            return EvaluationReport(
+                score=score,
+                raw_score=score,
+                llm_raw_score=score * 100,
+                report=[CriterionReport(weight=1.0, requirement="ok", verdict="MET", reason="ok")],
+            )
+
+        return patch("peven.petri.executors.Rubric.grade", mock_grade)
+
+    net = Net(
+        places=[Place(id="p0"), Place(id="p1"), Place(id="p2")],
+        transitions=[
+            Transition(
+                id="j1",
+                executor="judge",
+                config=JudgeConfig(model="test", rubric=[{"weight": 1.0, "requirement": "ok"}]),
+            ),
+            Transition(
+                id="j2",
+                executor="judge",
+                config=JudgeConfig(model="test", rubric=[{"weight": 1.0, "requirement": "ok"}]),
+            ),
+        ],
+        arcs=[
+            Arc(source="p0", target="j1"),
+            Arc(source="j1", target="p1"),
+            Arc(source="p1", target="j2"),
+            Arc(source="j2", target="p2"),
+        ],
+        initial_marking=Marking(tokens={"p0": [GenerateOutput(text="candidate")]}),
+    )
+
+    with _mock_rubric_grade_seq():
+        [result] = await execute(net)
+
+    assert result.status == "completed"
+    assert result.score is None
+
+
+@pytest.mark.asyncio
+async def test_run_designated_score_transition_controls_scalar_score():
+    """score_transition_id selects which judge defines RunResult.score."""
+    scores = iter([0.95, 0.3])
+
+    def _mock_rubric_grade_seq():
+        from rubric import CriterionReport, EvaluationReport
+
+        async def mock_grade(self, *a, **kw):
+            score = next(scores)
+            return EvaluationReport(
+                score=score,
+                raw_score=score,
+                llm_raw_score=score * 100,
+                report=[CriterionReport(weight=1.0, requirement="ok", verdict="MET", reason="ok")],
+            )
+
+        return patch("peven.petri.executors.Rubric.grade", mock_grade)
+
+    net = Net(
+        places=[Place(id="p0"), Place(id="p1"), Place(id="p2")],
+        transitions=[
+            Transition(
+                id="j1",
+                executor="judge",
+                config=JudgeConfig(model="test", rubric=[{"weight": 1.0, "requirement": "ok"}]),
+            ),
+            Transition(
+                id="j2",
+                executor="judge",
+                config=JudgeConfig(model="test", rubric=[{"weight": 1.0, "requirement": "ok"}]),
+            ),
+        ],
+        arcs=[
+            Arc(source="p0", target="j1"),
+            Arc(source="j1", target="p1"),
+            Arc(source="p1", target="j2"),
+            Arc(source="j2", target="p2"),
+        ],
+        initial_marking=Marking(tokens={"p0": [GenerateOutput(text="candidate")]}),
+        score_transition_id="j2",
+    )
+
+    with _mock_rubric_grade_seq():
+        [result] = await execute(net)
+
+    assert result.status == "completed"
+    assert result.score == 0.3
+
+
+@pytest.mark.asyncio
+async def test_run_missing_designated_score_is_incomplete():
+    """A run that reaches a sink without scoring is incomplete."""
+    net = Net(
+        places=[Place(id="p0"), Place(id="p1"), Place(id="done"), Place(id="scored")],
+        transitions=[
+            Transition(
+                id="route",
+                executor="agent",
+                config=GenerateConfig(model="test", prompt_template="{text}"),
+            ),
+            Transition(
+                id="score",
+                executor="judge",
+                config=JudgeConfig(model="test", rubric=[{"weight": 1.0, "requirement": "ok"}]),
+                when=lambda tokens: False,
+            ),
+            Transition(
+                id="finish",
+                executor="agent",
+                config=GenerateConfig(model="test", prompt_template="{text}"),
+            ),
+        ],
+        arcs=[
+            Arc(source="p0", target="route"),
+            Arc(source="route", target="p1"),
+            Arc(source="p1", target="score"),
+            Arc(source="score", target="scored"),
+            Arc(source="p1", target="finish"),
+            Arc(source="finish", target="done"),
+        ],
+        initial_marking=Marking(tokens={"p0": [GenerateOutput(text="candidate")]}),
+        score_transition_id="score",
+    )
+
+    with _mock_agent_run("done"):
+        [result] = await execute(net)
+
+    assert result.status == "incomplete"
+    assert result.terminal_reason == "missing_score"
+    assert result.score is None
+
+
+@pytest.mark.asyncio
+async def test_designated_scorer_uses_mean_of_all_emissions():
+    """A designated scorer aggregates repeated emissions by arithmetic mean."""
+    register("pass", MagicMock(execute=AsyncMock(return_value=GenerateOutput(text="done"))))
+    register("seq_score", SeqScoreExecutor([0.2, 0.8]))
+
+    net = Net(
+        places=[Place(id="prompt"), Place(id="response"), Place(id="scored"), Place(id="done")],
+        transitions=[
+            Transition(
+                id="gen",
+                executor="pass",
+                config=GenerateConfig(model="test", prompt_template="{text}"),
+            ),
+            Transition(
+                id="score",
+                executor="seq_score",
+                config=JudgeConfig(model="test", rubric=[{"weight": 1.0, "requirement": "ok"}]),
+            ),
+            Transition(
+                id="loop",
+                executor="pass",
+                config=GenerateConfig(model="test", prompt_template="{text}"),
+                when=lambda tokens: tokens[0].score < 0.7,
+            ),
+            Transition(
+                id="finish",
+                executor="pass",
+                config=GenerateConfig(model="test", prompt_template="{text}"),
+                when=lambda tokens: tokens[0].score >= 0.7,
+            ),
+        ],
+        arcs=[
+            Arc(source="prompt", target="gen"),
+            Arc(source="gen", target="response"),
+            Arc(source="response", target="score"),
+            Arc(source="score", target="scored"),
+            Arc(source="scored", target="loop"),
+            Arc(source="loop", target="response"),
+            Arc(source="scored", target="finish"),
+            Arc(source="finish", target="done"),
+        ],
+        initial_marking=Marking(tokens={"prompt": [GenerateOutput(text="candidate")]}),
+        score_transition_id="score",
+    )
+
+    [result] = await execute(net, fuse=10)
+
+    assert result.status == "completed"
+    assert result.score == pytest.approx(0.5)
+
+
+@pytest.mark.asyncio
+async def test_inferred_single_judge_does_not_force_missing_score_on_other_terminal_branch():
+    """Implicit single-judge inference should not poison legitimate unjudged branches."""
+    net = Net(
+        places=[Place(id="p0"), Place(id="mid"), Place(id="done"), Place(id="scored")],
+        transitions=[
+            Transition(
+                id="route",
+                executor="agent",
+                config=GenerateConfig(model="test", prompt_template="{text}"),
+            ),
+            Transition(
+                id="score",
+                executor="judge",
+                config=JudgeConfig(model="test", rubric=[{"weight": 1.0, "requirement": "ok"}]),
+                when=lambda tokens: False,
+            ),
+            Transition(
+                id="finish",
+                executor="agent",
+                config=GenerateConfig(model="test", prompt_template="{text}"),
+            ),
+        ],
+        arcs=[
+            Arc(source="p0", target="route"),
+            Arc(source="route", target="mid"),
+            Arc(source="mid", target="score"),
+            Arc(source="score", target="scored"),
+            Arc(source="mid", target="finish"),
+            Arc(source="finish", target="done"),
+        ],
+        initial_marking=Marking(tokens={"p0": [GenerateOutput(text="candidate")]}),
+    )
+
+    with _mock_agent_run("done"):
+        [result] = await execute(net)
+
+    assert result.status == "completed"
+    assert result.terminal_reason == "completed"
+    assert result.score is None
+
+
+@pytest.mark.asyncio
+async def test_designated_score_transition_must_return_judge_output():
+    """A designated score transition that returns a non-judge token fails the run."""
+    net = Net(
+        places=[Place(id="p0"), Place(id="out")],
+        transitions=[
+            Transition(
+                id="score",
+                executor="agent",
+                config=GenerateConfig(model="test", prompt_template="{text}"),
+            )
+        ],
+        arcs=[
+            Arc(source="p0", target="score"),
+            Arc(source="score", target="out"),
+        ],
+        initial_marking=Marking(tokens={"p0": [GenerateOutput(text="candidate")]}),
+        score_transition_id="score",
+    )
+
+    with _mock_agent_run("not a score"):
+        [result] = await execute(net)
+
+    assert result.status == "failed"
+    assert result.terminal_reason == "executor_failed"
+    assert "expected JudgeOutput" in result.error
+
+
+@pytest.mark.asyncio
+async def test_fuse_terminal_reason_is_per_run():
+    """Only runs that were still eligible when the fuse stopped are marked exhausted."""
+    net = Net(
+        places=[Place(id="in")],
+        transitions=[
+            Transition(
+                id="loop",
+                executor="agent",
+                config=GenerateConfig(model="test", prompt_template="{text}"),
+                when=lambda tokens: tokens[0].run_id == "loop",
+            )
+        ],
+        arcs=[
+            Arc(source="in", target="loop"),
+            Arc(source="loop", target="in"),
+        ],
+        initial_marking=Marking(
+            tokens={
+                "in": [
+                    GenerateOutput(text="loop", run_id="loop"),
+                    GenerateOutput(text="stuck", run_id="stuck"),
+                ]
+            }
+        ),
+    )
+
+    with _mock_agent_run("looped"):
+        results = await execute(net, fuse=2)
+
+    by_rid = {result.run_id: result for result in results}
+    assert by_rid["loop"].terminal_reason == "fuse_exhausted"
+    assert by_rid["stuck"].terminal_reason == "no_enabled_transition"
 
 
 # -- run() with colored tokens ------------------------------------------------
@@ -595,9 +905,11 @@ async def test_when_blocks_firing():
     )
 
     with _mock_agent_run("output"):
-        results = await execute(net)
+        [result] = await execute(net)
 
-    assert results == []
+    assert result.status == "incomplete"
+    assert result.terminal_reason == "no_enabled_transition"
+    assert result.trace == []
 
 
 @pytest.mark.asyncio
@@ -861,8 +1173,8 @@ async def test_retry_fuse_boundary():
 
     # fuse=1 means only 1 firing. Even with retries=5, the fuse limits total firings.
     with patch("peven.petri.executors.Agent.execute", always_fail):
-        results = await execute(net, fuse=1)
+        [result] = await execute(net, fuse=1)
 
-    # The transition fired once (consuming the fuse), failed, retried,
-    # but the re-spawned attempt counts as a new firing against the fuse.
-    assert len(results) <= 1
+    assert result.status == "incomplete"
+    assert result.terminal_reason == "fuse_exhausted"
+    assert attempts["count"] == 1

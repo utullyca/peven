@@ -25,6 +25,23 @@ def _write_eval(tmp_path: Path, code: str) -> Path:
     return p
 
 
+def _write_simple_eval(tmp_path: Path) -> Path:
+    return _write_eval(
+        tmp_path,
+        """\
+        from peven.petri.dsl import NetBuilder, agent
+        from peven.petri.types import GenerateOutput
+        n = NetBuilder()
+        prompt = n.place("prompt")
+        response = n.place("response")
+        gen = n.transition("gen", agent(model="test", prompt="Reply to {text}"))
+        prompt >> gen >> response
+        prompt.token(GenerateOutput(text="hello"))
+        net = n.build()
+        """,
+    )
+
+
 # -- loader --------------------------------------------------------------------
 
 
@@ -110,8 +127,9 @@ def test_load_spec_none(tmp_path):
 # -- validate command ----------------------------------------------------------
 
 
-def test_validate_valid():
-    result = runner.invoke(app, ["validate", "examples/simple.py"])
+def test_validate_valid(tmp_path):
+    eval_path = _write_simple_eval(tmp_path)
+    result = runner.invoke(app, ["validate", str(eval_path)])
     assert result.exit_code == 0
     assert "Valid" in result.output
     assert "prompt" in result.output
@@ -147,6 +165,7 @@ def test_validate_invalid_net(tmp_path):
 
 
 def test_run_with_mock(tmp_path):
+    eval_path = _write_simple_eval(tmp_path)
     db = tmp_path / "test.db"
     mock_result = MagicMock()
     mock_result.output = "hello"
@@ -157,7 +176,7 @@ def test_run_with_mock(tmp_path):
         patch("peven.petri.executors.PydanticAgent", return_value=mock_agent),
         patch("peven.cli.commands.run.save", wraps=lambda r, **kw: save(r, db_path=db, **kw)),
     ):
-        result = runner.invoke(app, ["run", "examples/simple.py"])
+        result = runner.invoke(app, ["run", str(eval_path)])
 
     assert result.exit_code == 0
     assert "Run " in result.output
@@ -169,13 +188,14 @@ def test_run_missing_file():
     assert "not found" in result.output
 
 
-def test_run_engine_exception():
+def test_run_engine_exception(tmp_path):
     """Engine exception is caught and shows friendly error."""
+    eval_path = _write_simple_eval(tmp_path)
     with patch(
         "peven.cli.commands.run.engine_run",
         side_effect=RuntimeError("boom"),
     ):
-        result = runner.invoke(app, ["run", "examples/simple.py"])
+        result = runner.invoke(app, ["run", str(eval_path)])
 
     assert result.exit_code == 1
     assert "Execution failed" in result.output
@@ -183,6 +203,7 @@ def test_run_engine_exception():
 
 def test_run_with_trace(tmp_path):
     """--trace flag renders execution trace."""
+    eval_path = _write_simple_eval(tmp_path)
     db = tmp_path / "test.db"
     mock_result = MagicMock()
     mock_result.output = "hello"
@@ -193,10 +214,28 @@ def test_run_with_trace(tmp_path):
         patch("peven.petri.executors.PydanticAgent", return_value=mock_agent),
         patch("peven.cli.commands.run.save", wraps=lambda r, **kw: save(r, db_path=db, **kw)),
     ):
-        result = runner.invoke(app, ["run", "examples/simple.py", "--trace"])
+        result = runner.invoke(app, ["run", str(eval_path), "--trace"])
 
     assert result.exit_code == 0
     assert "gen" in result.output  # transition name appears in trace
+
+
+def test_run_no_save(tmp_path):
+    eval_path = _write_simple_eval(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "hello"
+    mock_agent = MagicMock()
+    mock_agent.run = AsyncMock(return_value=mock_result)
+
+    with (
+        patch("peven.petri.executors.PydanticAgent", return_value=mock_agent),
+        patch("peven.cli.commands.run.save") as save_mock,
+    ):
+        result = runner.invoke(app, ["run", str(eval_path), "--no-save"])
+
+    assert result.exit_code == 0
+    assert "Run not saved" in result.output
+    save_mock.assert_not_called()
 
 
 # -- review command ------------------------------------------------------------
@@ -271,6 +310,37 @@ def test_review_show_run(tmp_path):
 
     assert result.exit_code == 0
     assert run_id in result.output
+
+
+def test_review_show_run_sanitizes_header(tmp_path):
+    """Single-run review header should strip terminal escapes."""
+    from peven.petri.types import GenerateOutput, RunResult, TransitionResult
+
+    db = tmp_path / "test.db"
+    results = [
+        RunResult(
+            status="completed",
+            score=0.9,
+            trace=[
+                TransitionResult(
+                    transition_id="gen", status="completed", output=GenerateOutput(text="hello")
+                )
+            ],
+        )
+    ]
+    run_id = save(results, file="eval-\x1b[31mbad.py", db_path=db)
+
+    with patch(
+        "peven.cli.commands.review.get",
+        wraps=lambda rid, **kw: __import__("peven.petri.store", fromlist=["get"]).get(
+            rid, db_path=db
+        ),
+    ):
+        result = runner.invoke(app, ["review", run_id])
+
+    assert result.exit_code == 0
+    assert "\x1b[31m" not in result.output
+    assert "eval-bad.py" in result.output
 
 
 def test_review_show_run_with_trace(tmp_path):

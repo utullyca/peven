@@ -11,6 +11,7 @@ from peven.petri.validation import (
     id_uniqueness,
     marking_validity,
     reachability,
+    score_transition_validity,
     validate,
 )
 
@@ -42,6 +43,19 @@ def test_validate_catches_reachability():
         validate(net)
 
 
+def test_validate_catches_unknown_score_transition():
+    """score_transition_id must refer to an existing transition."""
+    net = Net(
+        places=[Place(id="p"), Place(id="q")],
+        transitions=[Transition(id="t1", executor="agent")],
+        arcs=[Arc(source="p", target="t1"), Arc(source="t1", target="q")],
+        initial_marking=Marking(tokens={"p": [Token()]}),
+        score_transition_id="ghost",
+    )
+    with pytest.raises(ValidationError, match="Unknown score transition"):
+        validate(net)
+
+
 # -- id_uniqueness ----------------------------------------------------------------
 
 
@@ -53,6 +67,11 @@ def test_duplicate_place():
 def test_duplicate_transition():
     with pytest.raises(ValidationError, match="Duplicate ID"):
         id_uniqueness([Place(id="a")], [Transition(id="a", executor="agent")])
+
+
+def test_unknown_score_transition():
+    with pytest.raises(ValidationError, match="Unknown score transition"):
+        score_transition_validity("ghost", {"real"})
 
 
 # -- arc_integrity -------------------------------------------------------------

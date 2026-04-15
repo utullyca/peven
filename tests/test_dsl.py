@@ -25,11 +25,10 @@ def test_agent_helper():
 
 def test_judge_helper():
     rubric = [{"weight": 1.0, "requirement": "clear"}]
-    name, config = judge(model="test", rubric=rubric, threshold=0.8)
+    name, config = judge(model="test", rubric=rubric)
     assert name == "judge"
     assert isinstance(config, JudgeConfig)
     assert config.rubric == [{"weight": 1.0, "requirement": "clear"}]
-    assert config.pass_threshold == 0.8
 
 
 # -- Topology ------------------------------------------------------------------
@@ -164,6 +163,21 @@ def test_capacity():
     n.place("limited", capacity=3)
     net = n.build()
     assert net.places[0].capacity == 3
+
+
+def test_score_from_sets_net_score_transition():
+    """score_from() marks which transition provides the scalar score."""
+    n = NetBuilder()
+    start = n.place("start")
+    mid = n.place("mid")
+    out = n.place("out")
+    gen = n.transition("gen", agent(model="m", prompt="{text}"))
+    score = n.transition("score", judge(model="test", rubric=[{"weight": 1.0, "requirement": "ok"}]))
+
+    start >> gen >> mid >> score >> out
+    n.score_from(score)
+
+    assert n.build().score_transition_id == "score"
 
 
 # -- Retries -------------------------------------------------------------------

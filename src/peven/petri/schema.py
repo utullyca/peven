@@ -29,7 +29,11 @@ class GenerateConfig(BaseModel):
     model: Union[str, Model] = Field(exclude=True)
     prompt_template: str
     system_prompt: str | None = Field(default=None)
-    tools: list[Callable] | None = Field(default=None, exclude=True)
+    tools: list[Callable] | None = Field(
+        default=None,
+        exclude=True,
+        description="Raw Python callables executed with the current process permissions.",
+    )
     model_settings: dict[str, Any] | None = Field(default=None)
 
 
@@ -42,7 +46,6 @@ class JudgeConfig(BaseModel):
     strategy: Literal["per_criterion", "oneshot", "rubric_as_judge"] = Field(
         default="per_criterion"
     )
-    pass_threshold: float = Field(default=0.5)
 
 
 TransitionConfig = Annotated[
@@ -90,3 +93,4 @@ class Net(BaseModel):
     transitions: list[Transition]
     arcs: list[Arc]
     initial_marking: Marking
+    score_transition_id: str | None = Field(default=None)

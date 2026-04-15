@@ -20,6 +20,7 @@ from peven.petri.types import (
     RunResult,
     RunSummary,
     StoredRun,
+    TokenSnapshot,
     TransitionResult,
 )
 
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS results (
     run_id TEXT NOT NULL REFERENCES runs(id),
     token_run_id TEXT,
     status TEXT NOT NULL,
+    terminal_reason TEXT,
     score REAL,
     error TEXT,
     seq INTEGER NOT NULL
@@ -51,14 +53,33 @@ CREATE TABLE IF NOT EXISTS results (
 CREATE TABLE IF NOT EXISTS transitions (
     id TEXT PRIMARY KEY,
     result_id TEXT NOT NULL REFERENCES results(id),
+    transition_run_id TEXT,
     transition_id TEXT NOT NULL,
     status TEXT NOT NULL,
     error TEXT,
     output_type TEXT,
+    output_module TEXT,
     output_json TEXT,
     seq INTEGER NOT NULL
 );
 """
+
+
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    """Additive schema migrations for older local databases."""
+    columns = {
+        "results": {"terminal_reason": "TEXT"},
+        "transitions": {"output_module": "TEXT", "transition_run_id": "TEXT"},
+    }
+    for table, table_columns in columns.items():
+        existing = {
+            row["name"]
+            for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        for column_name, column_type in table_columns.items():
+            if column_name in existing:
+                continue
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_name} {column_type}")
 
 
 def _connect(db_path: Path | None = None) -> sqlite3.Connection:
@@ -67,7 +88,75 @@ def _connect(db_path: Path | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
+    _ensure_columns(conn)
     return conn
+
+
+def _snapshot_output(output):
+    """Convert unknown token outputs into inert snapshots before persistence."""
+    if output is None:
+        return None
+    if isinstance(output, (GenerateOutput, JudgeOutput, TokenSnapshot)):
+        return output
+
+    return TokenSnapshot(
+        run_id=output.run_id,
+        type_name=f"{type(output).__module__}.{type(output).__name__}",
+        payload=output.model_dump(mode="json"),
+    )
+
+
+def _serialize_output(output) -> tuple[str | None, str | None, str | None]:
+    """Return (type, module, json) for a transition output."""
+    output = _snapshot_output(output)
+    if output is None:
+        return None, None, None
+
+    return type(output).__name__, type(output).__module__, output.model_dump_json()
+
+
+def _aggregate_status(results: list[RunResult]) -> str:
+    """Collapse per-run statuses into a stored run status."""
+    failed = any(r.status == "failed" for r in results)
+    incomplete = any(r.status == "incomplete" for r in results)
+    if failed:
+        return "failed"
+    if incomplete:
+        return "incomplete"
+    return "completed"
+
+
+def _aggregate_score(results: list[RunResult]) -> float | None:
+    """Store an aggregate score only when every child result completed."""
+    if not results:
+        return None
+    if any(r.status != "completed" for r in results):
+        return None
+
+    scores = [r.score for r in results]
+    if any(score is None for score in scores):
+        return None
+    return sum(scores) / len(scores)
+
+
+def _aggregate_error(results: list[RunResult], status: str) -> str | None:
+    """Summarize aggregate errors without picking an arbitrary child error."""
+    if not results:
+        return None
+    if len(results) == 1:
+        return results[0].error
+    if status == "completed":
+        return None
+
+    failed = sum(1 for r in results if r.status == "failed")
+    incomplete = sum(1 for r in results if r.status == "incomplete")
+    parts: list[str] = []
+    if failed:
+        parts.append(f"{failed} failed")
+    if incomplete:
+        parts.append(f"{incomplete} incomplete")
+    summary = ", ".join(parts) if parts else status
+    return f"{summary}; inspect child results for details"
 
 
 def save(
@@ -78,10 +167,9 @@ def save(
     """Persist run results. Returns the run ID."""
     run_id = uuid.uuid4().hex[:12]
     now = datetime.now(UTC).isoformat()
-
-    failed = any(r.status == "failed" for r in results)
-    scores = [r.score for r in results if r.score is not None]
-    mean_score = sum(scores) / len(scores) if scores else None
+    status = _aggregate_status(results)
+    score = _aggregate_score(results)
+    error = _aggregate_error(results, status)
 
     conn = _connect(db_path)
     try:
@@ -92,9 +180,9 @@ def save(
                 run_id,
                 now,
                 file,
-                "failed" if failed else "completed",
-                mean_score,
-                next((r.error for r in results if r.error), None),
+                status,
+                score,
+                error,
                 len(results),
             ),
         )
@@ -102,27 +190,28 @@ def save(
         for i, r in enumerate(results):
             result_id = uuid.uuid4().hex[:12]
             conn.execute(
-                "INSERT INTO results (id, run_id, token_run_id, status, score, error, seq) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (result_id, run_id, r.run_id, r.status, r.score, r.error, i),
+                "INSERT INTO results (id, run_id, token_run_id, status, terminal_reason, score, error, seq) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (result_id, run_id, r.run_id, r.status, r.terminal_reason, r.score, r.error, i),
             )
 
             for j, t in enumerate(r.trace):
-                output_type = type(t.output).__name__ if t.output else None
-                output_json = t.output.model_dump_json() if t.output else None
+                output_type, output_module, output_json = _serialize_output(t.output)
 
                 conn.execute(
                     "INSERT INTO transitions "
-                    "(id, result_id, transition_id, status, error, "
-                    "output_type, output_json, seq) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    "(id, result_id, transition_run_id, transition_id, status, error, "
+                    "output_type, output_module, output_json, seq) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         uuid.uuid4().hex[:12],
                         result_id,
+                        t.run_id,
                         t.transition_id,
                         t.status,
                         t.error,
                         output_type,
+                        output_module,
                         output_json,
                         j,
                     ),
@@ -149,7 +238,7 @@ def get(run_id: str, db_path: Path | None = None) -> StoredRun | None:
             return None
 
         result_rows = conn.execute(
-            "SELECT id, token_run_id, status, score, error "
+            "SELECT id, token_run_id, status, terminal_reason, score, error "
             "FROM results WHERE run_id = ? ORDER BY seq",
             (run_id,),
         ).fetchall()
@@ -157,7 +246,8 @@ def get(run_id: str, db_path: Path | None = None) -> StoredRun | None:
         results = []
         for rr in result_rows:
             transition_rows = conn.execute(
-                "SELECT transition_id, status, error, output_type, output_json "
+                "SELECT transition_run_id, transition_id, status, error, "
+                "output_type, output_module, output_json "
                 "FROM transitions WHERE result_id = ? ORDER BY seq",
                 (rr["id"],),
             ).fetchall()
@@ -171,12 +261,23 @@ def get(run_id: str, db_path: Path | None = None) -> StoredRun | None:
                         output = GenerateOutput(**data)
                     elif tr["output_type"] == "JudgeOutput":
                         output = JudgeOutput(**data)
+                    elif tr["output_type"] == "TokenSnapshot":
+                        output = TokenSnapshot(**data)
+                    else:
+                        type_name = tr["output_type"] or "Token"
+                        if tr["output_module"] and tr["output_module"] != "builtins":
+                            type_name = f"{tr['output_module']}.{type_name}"
+                        output = TokenSnapshot(
+                            run_id=data.get("run_id"),
+                            type_name=type_name,
+                            payload=data,
+                        )
                 trace.append(
                     TransitionResult(
                         transition_id=tr["transition_id"],
                         status=tr["status"],
                         error=tr["error"],
-                        run_id=rr["token_run_id"],
+                        run_id=tr["transition_run_id"] or rr["token_run_id"],
                         output=output,
                     )
                 )
@@ -185,6 +286,7 @@ def get(run_id: str, db_path: Path | None = None) -> StoredRun | None:
                 RunResult(
                     run_id=rr["token_run_id"],
                     status=rr["status"],
+                    terminal_reason=rr["terminal_reason"],
                     score=rr["score"],
                     error=rr["error"],
                     trace=trace,

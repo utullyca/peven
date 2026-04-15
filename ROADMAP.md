@@ -1,5 +1,23 @@
 # Roadmap
 
+## Landing In v0.1.1
+
+**Runtime Integrity**
+- Atomic consume/revalidation before transition execution
+- Hard `max_concurrency` cap on reserved/in-flight transitions
+- Explicit `completed | failed | incomplete` run outcomes
+- `missing_score` terminal reason for designated score paths that never emitted a score
+- Guard failures surfaced in trace without poisoning successful runs
+- Honest stored aggregate scoring for mixed-status runs
+- Custom output snapshot round-tripping for review
+
+**QoL**
+- `score_at_least(...)` helper for explicit single-score-token routing
+- `--no-save` CLI path for intentional local persistence
+- Clearer trust-boundary docs around eval-file execution and tool callables
+
+---
+
 ## v0.1
 
 **Engine**
@@ -36,7 +54,7 @@
 - `peven review <id>` / `peven review all` — query stored runs
 
 **Tests**
-- 157 unit/integration tests, 20 live e2e tests (ollama qwen2.5:0.5b)
+- 185 package unit/integration tests in the release surface
 
 ---
 

@@ -198,6 +198,41 @@ async def test_semaphore_limits_concurrency():
     assert max_active[0] <= 2, f"Max concurrent was {max_active[0]}"
 
 
+@pytest.mark.asyncio
+async def test_max_concurrency_caps_reserved_transitions():
+    """Reservation/in-flight transitions should never exceed max_concurrency."""
+    logger = SlowExecutor(delay=0.05)
+    register("slow", logger)
+
+    net = Net(
+        places=[Place(id="in")] + [Place(id=f"out_{i}") for i in range(4)],
+        transitions=[
+            Transition(
+                id=f"t{i}",
+                executor="slow",
+                config=GenerateConfig(model="t", prompt_template=f"t{i}"),
+            )
+            for i in range(4)
+        ],
+        arcs=(
+            [Arc(source="in", target=f"t{i}") for i in range(4)]
+            + [Arc(source=f"t{i}", target=f"out_{i}") for i in range(4)]
+        ),
+        initial_marking=Marking(tokens={"in": [Token() for _ in range(4)]}),
+    )
+
+    max_reserved = 0
+
+    async def handler(event):
+        nonlocal max_reserved
+        max_reserved = max(max_reserved, len(event.get("in_flight", [])))
+
+    [result] = await execute(net, max_concurrency=2, event_handler=handler)
+
+    assert len(result.trace) == 4
+    assert max_reserved <= 2, f"Max reserved was {max_reserved}"
+
+
 # ==============================================================================
 # COMPLEX TOPOLOGIES
 # ==============================================================================
@@ -410,8 +445,10 @@ async def test_arc_weight_requires_multiple_tokens():
         initial_marking=Marking(tokens={"in": [Token()]}),  # only 1 token — not enough
     )
 
-    results = await execute(net)
-    assert results == []  # never fires — not enough tokens
+    [result] = await execute(net)
+    assert result.status == "incomplete"
+    assert result.terminal_reason == "no_enabled_transition"
+    assert result.trace == []
 
     # Now with 2 tokens — should fire
     net.initial_marking = Marking(tokens={"in": [Token(), Token()]})
@@ -512,8 +549,8 @@ async def test_token_data_preserved_through_pipeline():
 
 
 @pytest.mark.asyncio
-async def test_multiple_judges_last_score_wins():
-    """Two judges in sequence. Score is from the last one."""
+async def test_multiple_judges_without_designation_have_no_scalar_score():
+    """Two judges in sequence require an explicit score transition."""
     register("judge_high", ScoreExecutor(0.95))
     register("judge_low", ScoreExecutor(0.3))
 
@@ -542,17 +579,47 @@ async def test_multiple_judges_last_score_wins():
 
     [result] = await execute(net)
 
-    assert result.score == 0.3  # last judge wins
+    assert result.score is None
+
+
+@pytest.mark.asyncio
+async def test_multiple_judges_use_designated_score_transition():
+    """score_transition_id selects which judge defines the scalar score."""
+    register("judge_high", ScoreExecutor(0.95))
+    register("judge_low", ScoreExecutor(0.3))
+
+    net = Net(
+        places=[Place(id="p0"), Place(id="p1"), Place(id="p2"), Place(id="p3")],
+        transitions=[
+            Transition(
+                id="j1",
+                executor="judge_high",
+                config=JudgeConfig(model="test", rubric=[{"weight": 1.0, "requirement": "ok"}]),
+            ),
+            Transition(
+                id="j2",
+                executor="judge_low",
+                config=JudgeConfig(model="test", rubric=[{"weight": 1.0, "requirement": "ok"}]),
+            ),
+        ],
+        arcs=[
+            Arc(source="p0", target="j1"),
+            Arc(source="j1", target="p1"),
+            Arc(source="p1", target="j2"),
+            Arc(source="j2", target="p2"),
+        ],
+        initial_marking=Marking(tokens={"p0": [GenerateOutput(text="candidate")]}),
+        score_transition_id="j2",
+    )
+
+    [result] = await execute(net)
+
+    assert result.score == 0.3
 
 
 @pytest.mark.asyncio
 async def test_competing_transitions_no_guards():
-    """Two transitions from same place, no guards, one token.
-
-    Both get spawned from the initial ready() check (stale list),
-    but only the first one gets the actual token. The second runs
-    with empty inputs. Both fire — this is expected v0.1 behavior.
-    """
+    """Competing transitions revalidate ownership before executing."""
     received_inputs = {}
 
     class TrackInputsExecutor:
@@ -587,10 +654,8 @@ async def test_competing_transitions_no_guards():
 
     [result] = await execute(net)
 
-    # Both fire, but only one got the token
-    assert len(result.trace) == 2
-    input_counts = sorted(received_inputs.values())
-    assert input_counts == [0, 1]  # one got the token, one got nothing
+    assert len(result.trace) == 1
+    assert list(received_inputs.values()) == [1]
 
 
 @pytest.mark.asyncio
@@ -1035,6 +1100,85 @@ async def test_guard_throws_exception():
 
 
 @pytest.mark.asyncio
+async def test_guard_exception_records_failed_trace_but_completed_branch_can_finish():
+    """A guard crash should not poison a run that reaches completion elsewhere."""
+    register("pass", PassExecutor())
+
+    def bad_guard(tokens):
+        raise ValueError("guard broke")
+
+    net = Net(
+        places=[Place(id="in"), Place(id="out_a"), Place(id="out_b")],
+        transitions=[
+            Transition(
+                id="guarded",
+                executor="pass",
+                config=GenerateConfig(model="t", prompt_template="g"),
+                when=bad_guard,
+            ),
+            Transition(
+                id="unguarded",
+                executor="pass",
+                config=GenerateConfig(model="t", prompt_template="u"),
+            ),
+        ],
+        arcs=[
+            Arc(source="in", target="guarded"),
+            Arc(source="guarded", target="out_a"),
+            Arc(source="in", target="unguarded"),
+            Arc(source="unguarded", target="out_b"),
+        ],
+        initial_marking=Marking(tokens={"in": [Token()]}),
+    )
+
+    [result] = await execute(net)
+
+    guarded = [r for r in result.trace if r.transition_id == "guarded"]
+    assert any(r.transition_id == "unguarded" for r in result.trace)
+    assert len(guarded) == 1
+    assert guarded[0].status == "failed"
+    assert "guard broke" in (guarded[0].error or "")
+    assert result.status == "completed"
+    assert result.terminal_reason == "completed"
+    assert result.error is None
+
+
+@pytest.mark.asyncio
+async def test_guard_exception_causes_guard_error_when_it_blocks_completion():
+    """A guard crash should surface as guard_error when no completing path remains."""
+    register("pass", PassExecutor())
+
+    def bad_guard(tokens):
+        raise ValueError("guard broke")
+
+    net = Net(
+        places=[Place(id="in"), Place(id="out")],
+        transitions=[
+            Transition(
+                id="guarded",
+                executor="pass",
+                config=GenerateConfig(model="t", prompt_template="g"),
+                when=bad_guard,
+            ),
+        ],
+        arcs=[
+            Arc(source="in", target="guarded"),
+            Arc(source="guarded", target="out"),
+        ],
+        initial_marking=Marking(tokens={"in": [Token()]}),
+    )
+
+    [result] = await execute(net)
+
+    assert len(result.trace) == 1
+    assert result.trace[0].transition_id == "guarded"
+    assert result.trace[0].status == "failed"
+    assert result.status == "incomplete"
+    assert result.terminal_reason == "guard_error"
+    assert "guard broke" in (result.error or "")
+
+
+@pytest.mark.asyncio
 async def test_guard_truthy_nonbool():
     """when() returns truthy non-bool (int 1). Should still work."""
     register("pass", PassExecutor())
@@ -1153,8 +1297,10 @@ async def test_empty_net_no_transitions():
         initial_marking=Marking(tokens={"p": [Token()]}),
     )
 
-    results = await execute(net)
-    assert results == []
+    [result] = await execute(net)
+    assert result.status == "completed"
+    assert result.terminal_reason == "completed"
+    assert result.trace == []
 
 
 @pytest.mark.asyncio
@@ -1209,8 +1355,9 @@ async def test_guard_deadlock_terminates():
         initial_marking=Marking(tokens={"in": [Token()]}),
     )
 
-    results = await execute(net)
-    assert results == []  # nothing fires, clean exit
+    [result] = await execute(net)
+    assert result.status == "incomplete"
+    assert result.terminal_reason == "no_enabled_transition"
 
 
 @pytest.mark.asyncio
@@ -1256,7 +1403,8 @@ async def test_fuse_stops_infinite_cycle():
     # Fuse=10 means at most 10 firings. Cycle is gen→judge→loop = 3 per iteration.
     # So ~3 iterations = 9 firings, then fuse stops at 10.
     assert len(result.trace) == 10
-    assert result.status == "completed"  # fuse is not a failure, just a stop
+    assert result.status == "incomplete"
+    assert result.terminal_reason == "fuse_exhausted"
 
 
 @pytest.mark.asyncio
@@ -1314,8 +1462,9 @@ async def test_async_guard_blocks_transition():
         initial_marking=Marking(tokens={"in": [Token()]}),
     )
 
-    results = await execute(net)
-    assert results == []  # guard blocked, nothing fired
+    [result] = await execute(net)
+    assert result.status == "incomplete"
+    assert result.terminal_reason == "no_enabled_transition"
 
 
 @pytest.mark.asyncio

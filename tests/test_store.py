@@ -5,7 +5,13 @@ from __future__ import annotations
 import pytest
 
 from peven.petri.store import get, list_runs, save
-from peven.petri.types import GenerateOutput, JudgeOutput, RunResult, TransitionResult
+from peven.petri.schema import Token
+from peven.petri.types import GenerateOutput, JudgeOutput, RunResult, TokenSnapshot, TransitionResult
+
+
+class CustomToken(Token):
+    text: str
+    step: int
 
 # -- save + get roundtrip ------------------------------------------------------
 
@@ -66,8 +72,8 @@ def test_save_and_get_batch(tmp_path):
 
     assert data.result_count == 3
     assert data.status == "failed"  # one failed → run is failed
-    assert data.score == pytest.approx(0.7)  # mean of 0.8 and 0.6
-    assert data.error == "boom"
+    assert data.score is None
+    assert data.error == "1 failed; inspect child results for details"
     assert len(data.results) == 3
 
     # Verify order preserved
@@ -98,6 +104,52 @@ def test_save_preserves_token_run_ids(tmp_path):
     data = get(run_id, db_path=db)
     assert data.results[0].run_id == "abc123"
     assert data.results[0].trace[0].run_id == "abc123"
+
+
+def test_save_preserves_incomplete_terminal_reason(tmp_path):
+    """Incomplete runs roundtrip their terminal reason."""
+    db = tmp_path / "test.db"
+    results = [
+        RunResult(
+            run_id="abc123",
+            status="incomplete",
+            terminal_reason="fuse_exhausted",
+            error="Execution stopped after reaching fuse=3",
+            trace=[],
+        )
+    ]
+
+    run_id = save(results, db_path=db)
+    data = get(run_id, db_path=db)
+
+    assert data.status == "incomplete"
+    assert data.results[0].status == "incomplete"
+    assert data.results[0].terminal_reason == "fuse_exhausted"
+
+
+def test_save_custom_token_restores_snapshot(tmp_path):
+    """Unknown token classes reload as inert token snapshots."""
+    db = tmp_path / "test.db"
+    results = [
+        RunResult(
+            status="completed",
+            trace=[
+                TransitionResult(
+                    transition_id="env",
+                    status="completed",
+                    output=CustomToken(text="room A", step=2),
+                )
+            ],
+        )
+    ]
+
+    run_id = save(results, db_path=db)
+    data = get(run_id, db_path=db)
+    restored = data.results[0].trace[0].output
+
+    assert isinstance(restored, TokenSnapshot)
+    assert restored.payload["text"] == "room A"
+    assert restored.payload["step"] == 2
 
 
 # -- edge cases: empty and None ------------------------------------------------
@@ -286,11 +338,11 @@ def test_batch_all_failed(tmp_path):
     data = get(run_id, db_path=db)
     assert data.status == "failed"
     assert data.score is None
-    assert data.error == "e1"  # first error
+    assert data.error == "2 failed; inspect child results for details"
 
 
 def test_batch_mixed_status(tmp_path):
-    """One failed → run is failed, score is mean of completed only."""
+    """One failed → run is failed and has no aggregate score."""
     db = tmp_path / "test.db"
     results = [
         RunResult(run_id="a", status="completed", score=1.0, trace=[]),
@@ -299,7 +351,8 @@ def test_batch_mixed_status(tmp_path):
     run_id = save(results, db_path=db)
     data = get(run_id, db_path=db)
     assert data.status == "failed"
-    assert data.score == pytest.approx(1.0)  # only the completed one
+    assert data.score is None
+    assert data.error == "1 failed; inspect child results for details"
 
 
 # -- complex trace roundtrip ---------------------------------------------------
@@ -392,3 +445,53 @@ def test_judge_output_full_roundtrip(tmp_path):
     assert restored.llm_raw_score == 85.0, "llm_raw_score should survive roundtrip"
     assert len(restored.report) == 1, "report should survive roundtrip"
     assert restored.report[0].requirement == "clear"
+
+
+def test_save_custom_snapshot_is_idempotent(tmp_path):
+    """Saving a loaded TokenSnapshot should not wrap it in another snapshot."""
+    db = tmp_path / "test.db"
+    results = [
+        RunResult(
+            status="completed",
+            trace=[
+                TransitionResult(
+                    transition_id="env",
+                    status="completed",
+                    output=CustomToken(text="room A", step=1),
+                )
+            ],
+        )
+    ]
+
+    run_id = save(results, db_path=db)
+    first = get(run_id, db_path=db)
+    rerun_id = save(first.results, db_path=db)
+    second = get(rerun_id, db_path=db)
+
+    restored = second.results[0].trace[0].output
+    assert isinstance(restored, TokenSnapshot)
+    assert restored.type_name.endswith("CustomToken")
+    assert restored.payload["text"] == "room A"
+    assert restored.payload["step"] == 1
+
+
+def test_save_incomplete_batch_has_no_aggregate_score(tmp_path):
+    """Incomplete batches should not advertise an authoritative aggregate score."""
+    db = tmp_path / "test.db"
+    results = [
+        RunResult(run_id="a", status="completed", score=1.0, trace=[]),
+        RunResult(
+            run_id="b",
+            status="incomplete",
+            terminal_reason="missing_score",
+            error="missing score",
+            trace=[],
+        ),
+    ]
+
+    run_id = save(results, db_path=db)
+    data = get(run_id, db_path=db)
+
+    assert data.status == "incomplete"
+    assert data.score is None
+    assert data.error == "1 incomplete; inspect child results for details"

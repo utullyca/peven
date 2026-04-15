@@ -14,12 +14,22 @@ from peven.petri.store import save
 
 
 def run(
-    file: Annotated[str, typer.Argument(help="Path to eval .py file")],
-    concurrency: Annotated[int, typer.Option(help="Max concurrent transitions", min=1)] = 10,
+    file: Annotated[
+        str,
+        typer.Argument(help="Path to a trusted eval .py file (executed as Python)"),
+    ],
+    concurrency: Annotated[
+        int,
+        typer.Option(help="Max concurrent transition executions", min=1),
+    ] = 10,
     fuse: Annotated[int, typer.Option(help="Max total firings before stopping", min=1)] = 1000,
     trace: Annotated[bool, typer.Option(help="Show execution trace")] = False,
+    save_run: Annotated[
+        bool,
+        typer.Option("--save/--no-save", help="Persist results to ~/.peven/runs.db"),
+    ] = True,
 ):
-    """Run a Petri net evaluation."""
+    """Run a trusted Petri net eval file."""
     try:
         net, rows, place = load(file)
     except LoadError as e:
@@ -34,6 +44,9 @@ def run(
         typer.echo(f"Execution failed: {e}", err=True)
         raise typer.Exit(1) from None
 
-    run_id = save(results, file=file)
-    typer.echo(f"Run {run_id}\n")
+    if save_run:
+        run_id = save(results, file=file)
+        typer.echo(f"Run {run_id}\n")
+    else:
+        typer.echo("Run not saved (--no-save)\n")
     render(results, trace=trace)

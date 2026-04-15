@@ -35,3 +35,11 @@ Thumbs.db
 # uv
 .python-version
 uv.lock
+
+# Local codex / demo work
+.codex/
+.codex-venv/
+showcase/
+examples/staged.py
+tests/test_showcase.py
+tests/test_showcase_cli.py

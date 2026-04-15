@@ -13,9 +13,12 @@ from peven.petri.validation import validate as validate_net
 
 
 def validate(
-    file: Annotated[str, typer.Argument(help="Path to eval .py file")],
+    file: Annotated[
+        str,
+        typer.Argument(help="Path to a trusted eval .py file (executed as Python)"),
+    ],
 ):
-    """Validate a Petri net and show its topology."""
+    """Validate a trusted eval file and show its topology."""
     try:
         net, _, _ = load(file)
     except LoadError as e:

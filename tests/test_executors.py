@@ -61,10 +61,10 @@ def test_extract_text_skips_non_generate():
     assert _extract_text(tokens) == "found"
 
 
-def test_extract_text_takes_first():
-    """Should take text from the FIRST GenerateOutput."""
+def test_extract_text_joins_multiple_inputs():
+    """Multiple textual inputs should be joined in order."""
     tokens = [GenerateOutput(text="first"), GenerateOutput(text="second")]
-    assert _extract_text(tokens) == "first"
+    assert _extract_text(tokens) == "first\n\nsecond"
 
 
 # -- Agent -------------------------------------------------------------

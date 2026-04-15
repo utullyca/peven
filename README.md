@@ -104,6 +104,10 @@ results = await execute(net)  # in an async function
 # results = asyncio.run(execute(net))
 ```
 
+If a net has exactly one judge transition, `RunResult.score` is inferred from it.
+If a net has multiple judges, designate the scalar score explicitly with
+`n.score_from("transition_id")` or `n.score_from(transition_proxy)`.
+
 ## Nodes
 
 Every transition in a net is either an **agent** (generates text) or a **judge** (scores text). Each node gets its own model and configuration.
@@ -132,7 +136,7 @@ Models use pydantic-ai routing: `"openai:gpt-4o"`, `"anthropic:claude-sonnet-4-2
 ### judge
 
 ```python
-judge(model, rubric, strategy="per_criterion", threshold=0.5)
+judge(model, rubric, strategy="per_criterion")
 ```
 
 ```python
@@ -160,12 +164,43 @@ jdg_deep = n.transition("deep", judge(model="openai:gpt-4o", rubric=rubric))
 jdg_fast = n.transition("fast", judge(model="openai:gpt-4o-mini", rubric=rubric, strategy="oneshot"))
 ```
 
+Multiple judges are allowed. `n.score_from(...)` only designates which judge
+supplies `RunResult.score`; other judge outputs still remain in the trace and
+can continue to drive routing through places and guards.
+If the designated scorer fires multiple times in one run, `RunResult.score` is
+the mean of those scorer emissions.
+
+Routing remains explicit in the topology via `when(...)`. Thresholds live in the
+net.
+
+For common score-gated branches, use the package guard helper:
+
+```python
+from peven import score_at_least
+
+scored >> accept.when(score_at_least(0.8)) >> accepted
+scored >> revise.when(lambda tokens: not score_at_least(0.8)(tokens)) >> prompt
+```
+
+For cross-judge or richer aggregation patterns, write a custom guard or an
+explicit aggregator transition.
+
+## Trust Model
+
+- `peven run` and `peven validate` both execute the target eval file as Python.
+  Only run trusted eval files.
+- Agent `tools=` are raw Python callables executed with the same permissions as
+  the current process. Sandbox them yourself if needed.
+- `peven run` persists results to `~/.peven/runs.db` by default. Use
+  `--no-save` if you do not want local token payloads written to disk.
+
 ## CLI
 
 ```bash
 # Run an eval file
 peven run eval.py
 peven run eval.py --concurrency 5 --fuse 500
+peven run eval.py --no-save
 
 # Show per-transition execution trace (which transitions fired, outputs, scores)
 peven run eval.py --trace
@@ -180,11 +215,20 @@ peven review <run_id>
 peven review <run_id> --trace
 ```
 
-Every `peven run` automatically persists results to `~/.peven/runs.db` (created on first run, no setup needed) so you can review them later with `peven review`.
+By default `peven run` persists results to `~/.peven/runs.db` (created on first
+run, no setup needed) so you can review them later with `peven review`. Pass
+`--no-save` to disable local persistence for a run.
 
-## Examples
+Runs can finish as:
 
-The `examples/` folder has toy examples to get started:
+- `completed` — execution reached quiescence with no active tokens outside sink places
+- `failed` — a transition executor failed after retries
+- `incomplete` — execution stopped with active tokens remaining, such as a guard error, deadlock, or fuse exhaustion
+
+## Repo Examples
+
+If you are working from a repo checkout, the `examples/` folder has toy nets to
+get started:
 
 - **`simple.py`** — Single generate. Minimal net.
 - **`refine.py`** — Generate-judge-revise loop. Cycles back until score passes threshold.
@@ -197,15 +241,17 @@ peven validate examples/debate.py
 
 ## Releases
 
-This is v0.1. See [ROADMAP.md](./ROADMAP.md) for what's next.
+This is v0.1.1. See [ROADMAP.md](./ROADMAP.md) for what's next.
 
 ## Tests
+
+Repo checkout only:
 
 ```bash
 # Unit + integration
 uv run pytest tests/ --ignore=tests/test_e2e.py -v
 
-# E2E with live LLM (requires ollama)
+# Optional live E2E with Ollama
 uv run pytest tests/test_e2e.py -v
 ```
 

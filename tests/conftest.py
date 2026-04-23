@@ -1,16 +1,11 @@
-"""Shared test fixtures."""
-
 from __future__ import annotations
 
-import pytest
+import sys
+from pathlib import Path
 
-from peven.petri.executors import _REGISTRY
 
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
 
-@pytest.fixture(autouse=True)
-def _clean_executor_registry():
-    """Snapshot and restore the executor registry between tests."""
-    snapshot = dict(_REGISTRY)
-    yield
-    _REGISTRY.clear()
-    _REGISTRY.update(snapshot)
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))

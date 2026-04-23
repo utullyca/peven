@@ -1,0 +1,123 @@
+name: Release Gate
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/release-gate.yml"
+      - ".github/workflows/publish.yml"
+      - "examples/**"
+      - "pyproject.toml"
+      - "README.md"
+      - "LICENSE"
+      - "src/peven/**"
+      - "tests/**"
+      - "uv.lock"
+  push:
+    paths:
+      - ".github/workflows/release-gate.yml"
+      - ".github/workflows/publish.yml"
+      - "examples/**"
+      - "pyproject.toml"
+      - "README.md"
+      - "LICENSE"
+      - "src/peven/**"
+      - "tests/**"
+      - "uv.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install development dependencies
+        run: uv sync --dev
+
+      - name: Lint
+        run: uv run ruff check src tests examples
+
+      - name: Run test suite
+        run: uv run pytest -q
+
+      - name: Build distribution artifacts
+        run: uv build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+  uv-add-smoke:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      JULIA_DEPOT_PATH: ${{ runner.temp }}/julia-depot
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Install from wheel with uv and run a default-runtime smoke
+        run: |
+          tmpdir="$(mktemp -d)"
+          uv init --bare "$tmpdir/uv-add-smoke"
+          cd "$tmpdir/uv-add-smoke"
+          uv add "$GITHUB_WORKSPACE"/dist/peven-*.whl
+          uv run python -c "import peven; peven.install_runtime()"
+          uv run python - <<'PY'
+          import peven
+
+          @peven.executor("finish")
+          async def finish(ctx, ready):
+              del ready
+              return ctx.token({"ok": True})
+
+          @peven.env("uv_add_smoke")
+          class UVAddSmokeEnv(peven.Env):
+              ready = peven.place()
+              done = peven.place()
+
+              def initial_marking(self) -> peven.Marking:
+                  return peven.marking(ready=[{"seed": True}])
+
+              step = peven.transition(
+                  inputs=["ready"],
+                  outputs=["done"],
+                  executor="finish",
+              )
+
+          result = UVAddSmokeEnv().run()
+          assert result.status == "completed"
+          assert result.final_marking["done"][0].payload == {"ok": True}
+          PY

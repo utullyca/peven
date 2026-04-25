@@ -11,6 +11,9 @@ def test_topology_constructors_validate_basic_arguments() -> None:
     with pytest.raises(ValueError, match="positive int or None"):
         peven.place(capacity=0)
 
+    with pytest.raises(TypeError, match="place terminal"):
+        peven.place(terminal="yes")  # type: ignore[arg-type]
+
     with pytest.raises(ValueError, match="place ids must be non-empty strings"):
         peven.input("")
 

@@ -40,7 +40,7 @@ async def handoff_joiner(ctx, left, right):
 class HandoffDemo(peven.Env):
     prompt = peven.place(capacity=2, schema={"kind": "prompt"})
     ready = peven.place()
-    done = peven.place()
+    done = peven.place(terminal=True)
 
     write = peven.transition(
         inputs=[peven.input("prompt", weight=2)],
@@ -72,6 +72,7 @@ class GuardedHandoff(peven.Env):
 def test_package_env_spec_produces_authored_ir_payload() -> None:
     lowered = package_env_spec(HandoffDemo.spec())
 
+    assert HandoffDemo.spec().places[2].terminal is True
     assert lowered == EnvSpecMessage(
         schema_version=AUTHORED_ENV_SCHEMA_VERSION,
         env_name="handoff_demo",

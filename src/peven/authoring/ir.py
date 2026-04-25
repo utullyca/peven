@@ -2,8 +2,19 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable
 from dataclasses import dataclass
+from typing import Any, Protocol
+
+
+class ExecutorFn(Protocol):
+    """Async top-level function accepted by executor registration."""
+
+    __module__: str
+    __name__: str
+    __qualname__: str
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Awaitable[object]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -13,6 +24,7 @@ class PlaceSpec:
     id: str
     capacity: int | None = None
     schema: object | None = None
+    terminal: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,7 +60,7 @@ class ExecutorSpec:
     """One named reusable executor binding."""
 
     name: str
-    fn: Callable[..., Awaitable[object]]
+    fn: ExecutorFn
 
 
 @dataclass(frozen=True, slots=True)

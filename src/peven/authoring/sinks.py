@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as _datetime
 import json
 import time
 from collections.abc import Callable
@@ -250,6 +251,8 @@ class RichSink:
 
 
 def _event_to_json_ready(value: object) -> object:
+    if isinstance(value, (_datetime.datetime, _datetime.date, _datetime.time)):
+        return value.isoformat()
     if is_dataclass(value):
         return {key: _event_to_json_ready(item) for key, item in asdict(value).items()}
     if isinstance(value, msgspec.Struct):

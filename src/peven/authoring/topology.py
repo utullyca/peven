@@ -19,6 +19,7 @@ class PlaceDecl:
 
     capacity: int | None = None
     schema: object | None = None
+    terminal: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,11 +49,18 @@ class TransitionDecl:
     join_by: JoinNode | None = None
 
 
-def place(*, capacity: int | None = None, schema: object | None = None) -> PlaceDecl:
+def place(
+    *,
+    capacity: int | None = None,
+    schema: object | None = None,
+    terminal: bool = False,
+) -> PlaceDecl:
     """Declare one place on an env class body."""
     if capacity is not None and (type(capacity) is not int or capacity <= 0):
         raise ValueError("place capacity must be a positive int or None")
-    return PlaceDecl(capacity=capacity, schema=schema)
+    if type(terminal) is not bool:
+        raise TypeError("place terminal must be a bool")
+    return PlaceDecl(capacity=capacity, schema=schema, terminal=terminal)
 
 
 def input(place: str, *, weight: int = 1) -> InputDecl:

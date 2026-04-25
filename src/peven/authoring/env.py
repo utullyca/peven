@@ -172,6 +172,7 @@ def _collect_env_spec(cls: type[Env], *, env_name: str) -> EnvSpec:
                     id=attribute_name,
                     capacity=value.capacity,
                     schema=value.schema,
+                    terminal=value.terminal,
                 )
             )
             continue

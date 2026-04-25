@@ -30,7 +30,7 @@ async def writer_finalize(ctx, ready):
     @peven.env("judge_net")
     class JudgeEnv(peven.Env):
         ready = peven.place(capacity=2, schema={"kind": "input"})
-        scored = peven.place()
+        scored = peven.place(terminal=True)
 
         judge = peven.transition(
             inputs=["ready"],
@@ -46,6 +46,8 @@ async def writer_finalize(ctx, ready):
     assert [place.id for place in spec.places] == ["ready", "scored"]
     assert spec.places[0].capacity == 2
     assert spec.places[0].schema == {"kind": "input"}
+    assert spec.places[0].terminal is False
+    assert spec.places[1].terminal is True
     assert spec.transitions[0].id == "judge"
     assert spec.transitions[0].executor == "writer_finalize"
     assert spec.transitions[0].inputs[0].place == "ready"

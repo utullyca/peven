@@ -62,9 +62,10 @@ async def smoke_collect_executor(ctx, done):
 class TestSmokeOllamaEnv(peven.Env):
     prompt = peven.place(schema={"kind": "question"})
     done = peven.place()
-    report = peven.place()
+    report = peven.place(terminal=True)
 
-    def initial_marking(self) -> peven.Marking:
+    def initial_marking(self, seed: int | None = None) -> peven.Marking:
+        del seed
         return peven.marking(prompt=TASKS)
 
     answer = peven.transition(

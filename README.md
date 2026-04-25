@@ -81,7 +81,7 @@ async def answer(ctx, prompt):
 @peven.env("single_question")
 class SingleQuestionEnv(peven.Env):
     prompt = peven.place(schema={"kind": "question"})
-    report = peven.place()
+    report = peven.place(terminal=True)
 
     def initial_marking(self) -> peven.Marking:
         return peven.marking(
@@ -108,6 +108,11 @@ That same pattern scales to richer topologies:
 - retry transitions without rewriting control flow
 - cap the run with `fuse`
 
+Mark a final place with `terminal=True` when a token there means the run is
+complete. The Julia engine still reports the real Petri-net condition; Python
+normalizes `no_enabled_transition` into a completed `RunResult` only when a
+terminal place contains a token.
+
 ## Why Julia
 
 The Julia side is not there for novelty. It keeps the engine closer to the real Petri-net model.
@@ -131,6 +136,16 @@ The repo examples are intentionally small but representative:
 - `examples/trace.py` — PydanticAI trace integration, `fuse`, and rich run output
 - `examples/guarded_batch.py` — guarded retries around a batch step
 - `examples/keyed_join.py` — branch, answer in parallel, and keyed-join the results
+- `examples/minigrid/` — MiniGrid DoorKey with a mover, planner, fog memory, and terminal scoring
+
+## Release notes
+
+### 0.2.1
+
+- Added `peven.place(terminal=True)` for Python-side completion normalization.
+- Updated Rich output to hide `no_enabled_transition` for completed terminal-place runs.
+- Added the MiniGrid DoorKey example under the `examples` dependency group.
+- Added `gymnasium` and `minigrid` to the optional examples dependencies.
 
 ## Inspiration
 

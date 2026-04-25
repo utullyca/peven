@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Sequence
+from dataclasses import replace
 from typing import Protocol, TypeVar
 
 import msgspec
@@ -226,7 +227,7 @@ async def run_until_terminal_result(
     initial_marking: dict[str, list[Token]],
     callback: TransitionCallback,
 ) -> RunResult:
-    del compiled_env, env, initial_marking
+    del env, initial_marking
     try:
         reader, writer = _require_session_streams(runtime.session)
     except RuntimeError as exc:
@@ -293,6 +294,8 @@ async def run_until_terminal_result(
                 message_env_run_id, event = normalize_runtime_event(message)
             except (TypeError, ValueError) as exc:
                 raise AdapterProtocolError("adapter sent a malformed runtime event") from exc
+            if isinstance(event, RunFinished):
+                event = _normalize_run_finished(compiled_env, event)
             accepted = _buffer_runtime_event(
                 runtime=runtime, env_run_id=message_env_run_id, event=event
             )
@@ -328,6 +331,33 @@ async def run_until_terminal_result(
                 pass
         if pending_callbacks:
             await asyncio.gather(*pending_callbacks, return_exceptions=True)
+
+
+def _normalize_run_finished(compiled_env: CompiledEnv, event: RunFinished) -> RunFinished:
+    result = event.result
+    if not _is_terminal_place_completion(compiled_env, result):
+        return event
+    return RunFinished(
+        result=replace(
+            result,
+            status="completed",
+            error=None,
+            terminal_reason=None,
+            terminal_bundle=None,
+            terminal_transition=None,
+        )
+    )
+
+
+def _is_terminal_place_completion(compiled_env: CompiledEnv, result: RunResult) -> bool:
+    if result.status != "incomplete":
+        return False
+    if result.terminal_reason != "no_enabled_transition" or result.error is not None:
+        return False
+    return any(
+        place.terminal and bool(result.final_marking.get(place.id))
+        for place in compiled_env.env_spec.places
+    )
 
 
 async def run_env(

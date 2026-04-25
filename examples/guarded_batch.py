@@ -78,9 +78,10 @@ class GuardedBatchEnv(peven.Env):
         capacity=1,
         schema={"kind": "question_batch", "size": len(TASKS)},
     )
-    report = peven.place()
+    report = peven.place(terminal=True)
 
-    def initial_marking(self) -> peven.Marking:
+    def initial_marking(self, seed: int | None = None) -> peven.Marking:
+        del seed
         return peven.marking(prompt=[TASK_BATCH])
 
     batch = peven.transition(

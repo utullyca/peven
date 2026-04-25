@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+from datetime import UTC, datetime
 
 import pytest
 from pydantic_ai.messages import FinalResultEvent
@@ -64,6 +65,24 @@ def test_jsonl_sink_accepts_generic_trace_records(tmp_path) -> None:
         "event": {"phase": "tool_call", "tool": "search"},
         "kind": "agent_trace",
         "transition_id": "answer",
+    }
+
+
+def test_jsonl_sink_serializes_datetime_values(tmp_path) -> None:
+    sink = peven.JSONLSink(tmp_path / "events.jsonl")
+
+    sink.write(
+        {
+            "kind": "agent_trace",
+            "created_at": datetime(2026, 4, 25, 12, 30, tzinfo=UTC),
+        }
+    )
+
+    payload = json.loads((tmp_path / "events.jsonl").read_text(encoding="utf-8").strip())
+
+    assert payload == {
+        "created_at": "2026-04-25T12:30:00+00:00",
+        "kind": "agent_trace",
     }
 
 

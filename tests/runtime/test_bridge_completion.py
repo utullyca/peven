@@ -136,6 +136,95 @@ async def bridge_completion_finish(ctx):
 
 
 @pytest.mark.asyncio
+async def test_terminal_place_turns_no_enabled_transition_into_completion() -> None:
+    @peven.env("bridge_terminal_place_env")
+    class BridgeTerminalPlaceEnv(peven.Env):
+        done = peven.place(terminal=True)
+
+    runtime = SharedRuntime(
+        session=make_session(
+            frames=[
+                RunFinishedMessage(
+                    env_run_id=11,
+                    result=RunResultMessage(
+                        run_key="rk-1",
+                        status="incomplete",
+                        terminal_reason="no_enabled_transition",
+                        final_marking={
+                            "done": [peven.token({"ok": True}, run_key="rk-1")]
+                        },
+                    ),
+                ),
+            ]
+        ),
+        loop=asyncio.get_running_loop(),
+        command=("fake-runtime",),
+    )
+    sink = _RecordingSink(events=[])
+    open_run(runtime, 11, sink=sink)
+    env = BridgeTerminalPlaceEnv()
+    compiled = compile_env(BridgeTerminalPlaceEnv.spec())
+
+    result = await bridge_module.run_until_terminal_result(
+        runtime=runtime,
+        compiled_env=compiled,
+        env=env,
+        env_run_id=11,
+        initial_marking={},
+        callback=make_transition_callback(compiled, env),
+    )
+
+    assert result.status == "completed"
+    assert result.terminal_reason is None
+    assert result.final_marking["done"][0].payload == {"ok": True}
+    assert sink.events[-1] == peven.RunFinished(result=result)
+
+
+@pytest.mark.asyncio
+async def test_non_terminal_deadlock_stays_incomplete() -> None:
+    @peven.env("bridge_non_terminal_deadlock_env")
+    class BridgeNonTerminalDeadlockEnv(peven.Env):
+        waiting = peven.place()
+
+    runtime = SharedRuntime(
+        session=make_session(
+            frames=[
+                RunFinishedMessage(
+                    env_run_id=12,
+                    result=RunResultMessage(
+                        run_key="rk-1",
+                        status="incomplete",
+                        terminal_reason="no_enabled_transition",
+                        final_marking={
+                            "waiting": [peven.token({"blocked": True}, run_key="rk-1")]
+                        },
+                    ),
+                ),
+            ]
+        ),
+        loop=asyncio.get_running_loop(),
+        command=("fake-runtime",),
+    )
+    sink = _RecordingSink(events=[])
+    open_run(runtime, 12, sink=sink)
+    env = BridgeNonTerminalDeadlockEnv()
+    compiled = compile_env(BridgeNonTerminalDeadlockEnv.spec())
+
+    result = await bridge_module.run_until_terminal_result(
+        runtime=runtime,
+        compiled_env=compiled,
+        env=env,
+        env_run_id=12,
+        initial_marking={},
+        callback=make_transition_callback(compiled, env),
+    )
+
+    assert result.status == "incomplete"
+    assert result.terminal_reason == "no_enabled_transition"
+    assert sink.events[-1] == peven.RunFinished(result=result)
+
+
+@pytest.mark.asyncio
 async def test_run_until_terminal_result_decodes_failed_terminal_results_without_raising() -> None:
     @peven.env("bridge_completion_failed_env")
     class BridgeCompletionFailedEnv(peven.Env):

@@ -102,9 +102,10 @@ class KeyedJoinEnv(peven.Env):
     full_prompt = peven.place()
     fast_answer = peven.place()
     full_answer = peven.place()
-    merged = peven.place()
+    merged = peven.place(terminal=True)
 
-    def initial_marking(self) -> peven.Marking:
+    def initial_marking(self, seed: int | None = None) -> peven.Marking:
+        del seed
         return peven.marking(prompt=TASKS)
 
     tee = peven.transition(

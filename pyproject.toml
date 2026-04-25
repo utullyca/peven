@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "peven"
-version = "0.2.0"
+version = "0.2.1"
 description = "Python authoring for structured LLM environments powered by a Julia Petri-net runtime"
 readme = "README.md"
 license = "Apache-2.0"
@@ -57,6 +57,10 @@ dev = [
     "rich>=13.9.0",
     "ruff>=0.11.0",
 ]
+examples = [
+    "gymnasium>=1.0.0",
+    "minigrid>=3.0.0",
+]
 
 [tool.hatch.build]
 exclude = [
@@ -84,4 +88,5 @@ asyncio_mode = "auto"
 markers = [
     "integration: tests that exercise real external processes or toolchains",
     "slow: tests that may perform real Julia resolution or installation work",
+    "ollama: tests that require a local ollama server with specific models loaded",
 ]

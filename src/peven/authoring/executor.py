@@ -6,12 +6,13 @@ import inspect
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from types import FunctionType
+from typing import ParamSpec, TypeVar, cast
 
 from ..runtime.sinks import Sink as _Sink
 from ..shared.errors import PevenValidationError, ValidationIssue
 from ..shared.events import BundleRef
 from ..shared.token import Token, token as _token
-from .ir import ExecutorSpec
+from .ir import ExecutorFn, ExecutorSpec
 
 
 __all__ = [
@@ -24,6 +25,8 @@ __all__ = [
 
 _EXECUTORS: dict[str, ExecutorSpec] = {}
 _EXECUTOR_REGISTRY_VERSION = 0
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,12 +52,12 @@ class ExecutorContext:
 
 def executor(
     name: str,
-) -> Callable[[Callable[..., Awaitable[object]]], Callable[..., Awaitable[object]]]:
+) -> Callable[[Callable[_P, Awaitable[_R]]], Callable[_P, Awaitable[_R]]]:
     """Register one top-level reusable async executor by explicit name."""
     if type(name) is not str or not name:
         raise ValueError("executor name must be a non-empty string")
 
-    def decorator(function: Callable[..., Awaitable[object]]) -> Callable[..., Awaitable[object]]:
+    def decorator(function: Callable[_P, Awaitable[_R]]) -> Callable[_P, Awaitable[_R]]:
         if not inspect.iscoroutinefunction(function) or not _is_top_level_function(function):
             raise PevenValidationError(
                 [
@@ -65,13 +68,14 @@ def executor(
                     )
                 ]
             )
+        executor_function = cast(ExecutorFn, function)
         existing = _EXECUTORS.get(name)
-        if existing is not None and not _is_executor_reload(existing.fn, function):
+        if existing is not None and not _is_executor_reload(existing.fn, executor_function):
             raise PevenValidationError(
                 [ValidationIssue("duplicate_executor", name, f"duplicate executor {name}")]
             )
         _bump_executor_registry_version()
-        _EXECUTORS[name] = ExecutorSpec(name=name, fn=function)
+        _EXECUTORS[name] = ExecutorSpec(name=name, fn=executor_function)
         return function
 
     return decorator
@@ -156,8 +160,8 @@ def _is_top_level_function(function: object) -> bool:
 
 
 def _is_executor_reload(
-    existing: Callable[..., Awaitable[object]],
-    replacement: Callable[..., Awaitable[object]],
+    existing: ExecutorFn,
+    replacement: ExecutorFn,
 ) -> bool:
     return (
         existing.__module__ == replacement.__module__

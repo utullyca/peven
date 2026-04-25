@@ -16,5 +16,7 @@ htmlcov/
 build/
 dist/
 
+logs/
+
 .claude/
 .serena/

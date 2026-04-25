@@ -99,9 +99,10 @@ async def judge_answer(ctx, draft):
 class TraceEnv(peven.Env):
     prompt = peven.place(schema={"kind": "trace_prompt"})
     draft = peven.place()
-    done = peven.place()
+    done = peven.place(terminal=True)
 
-    def initial_marking(self) -> peven.Marking:
+    def initial_marking(self, seed: int | None = None) -> peven.Marking:
+        del seed
         return peven.marking(prompt=TASKS)
 
     answer = peven.transition(

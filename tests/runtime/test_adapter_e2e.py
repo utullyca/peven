@@ -49,6 +49,7 @@ def _env_spec(
                 InputArcSpec(
                     place=arc[0],
                     weight=arc[1],
+                    optional=arc[2] if len(arc) > 2 else False,
                 )
                 for arc in transition["inputs"]
             ),
@@ -564,6 +565,38 @@ async def adapter_invalid_load_finish(ctx, ready):
         ),
         pytest.param(
             _env_spec(
+                env_name="adapter_invalid_optional_only",
+                places=["plan", "done"],
+                transitions=[
+                    {
+                        "id": "finish",
+                        "inputs": [("plan", 1, True)],
+                        "outputs": ["done"],
+                    }
+                ],
+            ),
+            "missing_required_input:finish",
+            id="optional_only",
+        ),
+        pytest.param(
+            _env_spec(
+                env_name="adapter_invalid_optional_keyed_join",
+                places=["left", "right", "done"],
+                transitions=[
+                    {
+                        "id": "join",
+                        "executor": "adapter_invalid_load_join",
+                        "inputs": [("left", 1), ("right", 1, True)],
+                        "outputs": ["done"],
+                        "join_by_spec": {"kind": "payload_ref", "path": ["case_id"]},
+                    }
+                ],
+            ),
+            "optional_keyed_join:join",
+            id="optional_keyed_join",
+        ),
+        pytest.param(
+            _env_spec(
                 env_name="adapter_invalid_capacity",
                 places=[("ready", 1), "done"],
                 transitions=[
@@ -681,4 +714,65 @@ async def adapter_e2e_finish(ctx, ready):
     assert peven.completed_firings(result)
     assert result.final_marking == {
         "done": [peven.Token(run_key="rk-1", color="default", payload={"done": 7})]
+    }
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+def test_real_adapter_round_trips_optional_input_arcs() -> None:
+    command = require_adapter_command()
+    _register_executor(
+        """
+@peven.executor("adapter_optional_finish")
+async def adapter_optional_finish(ctx, ready, plan=None):
+    return peven.token(
+        {
+            "ready": ready.payload["seed"],
+            "plan": None if plan is None else plan.payload["advice"],
+            "input_places": sorted(ctx.inputs_by_place),
+        },
+        run_key=ctx.bundle.run_key,
+    )
+"""
+    )
+
+    @peven.env("adapter_optional_env")
+    class AdapterOptionalEnv(peven.Env):
+        ready = peven.place()
+        plan = peven.place()
+        done = peven.place()
+
+        finish = peven.transition(
+            inputs=["ready", peven.input("plan", optional=True)],
+            outputs=["done"],
+            executor="adapter_optional_finish",
+        )
+
+    absent = AdapterOptionalEnv().run(
+        command=command,
+        runtime_runner=bridge_module.run_until_terminal_result,
+        marking=peven.Marking(
+            {"ready": [peven.token({"seed": 1}, run_key="rk-1")]}
+        ),
+    )
+    present = AdapterOptionalEnv().run(
+        command=command,
+        runtime_runner=bridge_module.run_until_terminal_result,
+        marking=peven.Marking(
+            {
+                "ready": [peven.token({"seed": 2}, run_key="rk-1")],
+                "plan": [peven.token({"advice": "go"}, run_key="rk-1")],
+            }
+        ),
+    )
+
+    assert absent.final_marking["done"][0].payload == {
+        "ready": 1,
+        "plan": None,
+        "input_places": ["plan", "ready"],
+    }
+    assert present.final_marking["done"][0].payload == {
+        "ready": 2,
+        "plan": "go",
+        "input_places": ["plan", "ready"],
     }

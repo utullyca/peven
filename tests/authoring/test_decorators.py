@@ -52,6 +52,7 @@ async def writer_finalize(ctx, ready):
     assert spec.transitions[0].executor == "writer_finalize"
     assert spec.transitions[0].inputs[0].place == "ready"
     assert spec.transitions[0].inputs[0].weight == 1
+    assert spec.transitions[0].inputs[0].optional is False
     assert spec.transitions[0].outputs[0].place == "scored"
     assert spec.transitions[0].guard_spec == {
         "kind": "not",
@@ -375,6 +376,7 @@ async def merge_writer(ctx, left, right_pair):
     spec = MergeEnv.__peven_env_spec__
 
     assert tuple(arc.weight for arc in spec.transitions[0].inputs) == (1, 2)
+    assert tuple(arc.optional for arc in spec.transitions[0].inputs) == (False, False)
 
     _register_executor(
         """
@@ -396,6 +398,33 @@ async def bad_merge_writer(ctx, left):
                 outputs=["done"],
                 executor="bad_merge_writer",
             )
+
+
+def test_env_ir_preserves_optional_input_arcs() -> None:
+    _register_executor(
+        """
+@peven.executor("optional_plan_writer")
+async def optional_plan_writer(ctx, ready, plan=None):
+    return peven.token({"ok": True}, run_key=ctx.bundle.run_key)
+"""
+    )
+
+    @peven.env("optional_plan_net")
+    class OptionalPlanEnv(peven.Env):
+        ready = peven.place()
+        plan = peven.place()
+        done = peven.place()
+
+        finish = peven.transition(
+            inputs=["ready", peven.input("plan", optional=True)],
+            outputs=["done"],
+            executor="optional_plan_writer",
+        )
+
+    assert [(arc.place, arc.weight, arc.optional) for arc in OptionalPlanEnv.spec().transitions[0].inputs] == [
+        ("ready", 1, False),
+        ("plan", 1, True),
+    ]
 
 
 def test_executor_registration_is_top_level_and_unique() -> None:

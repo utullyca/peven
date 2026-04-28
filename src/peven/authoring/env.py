@@ -184,7 +184,11 @@ def _collect_env_spec(cls: type[Env], *, env_name: str) -> EnvSpec:
                 id=attribute_name,
                 executor=declaration.executor,
                 inputs=tuple(
-                    InputArcSpec(place=arc.place, weight=arc.weight)
+                    InputArcSpec(
+                        place=arc.place,
+                        weight=arc.weight,
+                        optional=arc.optional,
+                    )
                     for arc in declaration.inputs
                 ),
                 outputs=tuple(

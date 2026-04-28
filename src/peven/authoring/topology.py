@@ -28,6 +28,7 @@ class InputDecl:
 
     place: str
     weight: int = 1
+    optional: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,12 +64,14 @@ def place(
     return PlaceDecl(capacity=capacity, schema=schema, terminal=terminal)
 
 
-def input(place: str, *, weight: int = 1) -> InputDecl:
+def input(place: str, *, weight: int = 1, optional: bool = False) -> InputDecl:
     """Construct one input arc declaration."""
     _validate_place_name(place)
     if type(weight) is not int or weight <= 0:
         raise ValueError("input weight must be a positive int")
-    return InputDecl(place=place, weight=weight)
+    if type(optional) is not bool:
+        raise TypeError("input optional must be a bool")
+    return InputDecl(place=place, weight=weight, optional=optional)
 
 
 def output(place: str) -> OutputDecl:

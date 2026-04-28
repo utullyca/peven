@@ -4,12 +4,12 @@
     "PevenPy": {
       "uuid": "d91f4ba2-6d31-4fa2-8445-a14fdb8658c7",
       "url": "https://github.com/jammy-eggs/PevenPy.jl",
-      "rev": "v0.1.0"
+      "rev": "v0.1.1"
     },
     "Peven": {
       "uuid": "7c3f1014-b4da-4ae0-8bf8-3335ad02c49c",
       "url": "https://github.com/jammy-eggs/Peven.jl",
-      "rev": "v0.4.3"
+      "rev": "5e20a7ae6ad000e9195b385e0ab56c94c986abbc"
     },
     "MsgPack": {
       "uuid": "99f44e22-a591-53d1-9472-aa23ef4bd671",

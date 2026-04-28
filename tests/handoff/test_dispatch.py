@@ -65,6 +65,7 @@ async def compile_router(ctx, ready):
         "rejected",
     ]
     assert compiled.transition_bindings["write"].input_weights == (1,)
+    assert compiled.transition_bindings["write"].input_optional == (False,)
     assert compiled.transition_bindings["write"].output_places == ("ready",)
     assert compiled.transition_bindings["route"].input_weights == (2,)
     assert compiled.transition_bindings["route"].output_places == (
@@ -98,6 +99,95 @@ async def compile_keyed_join(ctx, left, right):
     compiled = compile_env(CompiledKeyedJoin.spec())
 
     assert compiled.transition_bindings["merge"].input_weights == (1, 1)
+
+
+@pytest.mark.asyncio
+async def test_invoke_transition_adapts_absent_optional_inputs_from_place_buckets() -> None:
+    namespace = _register_executor(
+        """
+@peven.executor("dispatch_optional_plan")
+async def dispatch_optional_plan(ctx, ready, plan=None):
+    calls.append((ready, plan, sorted(ctx.inputs_by_place)))
+    return peven.token({"planned": plan is not None}, run_key=ctx.bundle.run_key)
+"""
+    )
+
+    @peven.env("dispatch_optional_plan_env")
+    class DispatchOptionalPlanEnv(peven.Env):
+        ready = peven.place()
+        plan = peven.place()
+        done = peven.place()
+
+        finish = peven.transition(
+            inputs=["ready", peven.input("plan", optional=True)],
+            outputs=["done"],
+            executor="dispatch_optional_plan",
+        )
+
+    compiled = compile_env(DispatchOptionalPlanEnv.spec())
+    binding = compiled.transition_bindings["finish"]
+    ready = peven.token({"kind": "ready"}, run_key="rk-1")
+
+    result = await invoke_transition(
+        compiled,
+        "finish",
+        SimpleNamespace(name="env"),
+        peven.BundleRef(transition_id="finish", run_key="rk-1", ordinal=1),
+        [ready],
+        attempt=1,
+        inputs_by_place={"ready": [ready], "plan": []},
+    )
+
+    assert binding.input_places == ("ready", "plan")
+    assert binding.input_weights == (1, 1)
+    assert binding.input_optional == (False, True)
+    assert namespace["calls"] == [(ready, None, ["plan", "ready"])]
+    assert result == {
+        "done": [Token(run_key="rk-1", color="default", payload={"planned": False})]
+    }
+
+
+@pytest.mark.asyncio
+async def test_invoke_transition_adapts_present_optional_inputs_from_place_buckets() -> None:
+    namespace = _register_executor(
+        """
+@peven.executor("dispatch_present_optional_plan")
+async def dispatch_present_optional_plan(ctx, ready, plan=None):
+    calls.append((ready, plan))
+    return peven.token({"planned": plan.payload["advice"]}, run_key=ctx.bundle.run_key)
+"""
+    )
+
+    @peven.env("dispatch_present_optional_plan_env")
+    class DispatchPresentOptionalPlanEnv(peven.Env):
+        ready = peven.place()
+        plan = peven.place()
+        done = peven.place()
+
+        finish = peven.transition(
+            inputs=["ready", peven.input("plan", optional=True)],
+            outputs=["done"],
+            executor="dispatch_present_optional_plan",
+        )
+
+    compiled = compile_env(DispatchPresentOptionalPlanEnv.spec())
+    ready = peven.token({"kind": "ready"}, run_key="rk-1")
+    plan = peven.token({"advice": "go"}, run_key="rk-1")
+
+    result = await invoke_transition(
+        compiled,
+        "finish",
+        SimpleNamespace(name="env"),
+        peven.BundleRef(transition_id="finish", run_key="rk-1", ordinal=1),
+        [ready, plan],
+        attempt=1,
+        inputs_by_place={"ready": [ready], "plan": [plan]},
+    )
+
+    assert namespace["calls"] == [(ready, plan)]
+    assert result == {
+        "done": [Token(run_key="rk-1", color="default", payload={"planned": "go"})]
+    }
 
 
 @pytest.mark.asyncio

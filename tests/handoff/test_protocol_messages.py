@@ -68,6 +68,51 @@ def test_adapt_weighted_inputs_matches_authored_input_weights() -> None:
         adapt_weighted_inputs([left], input_weights=(1, 2))
 
 
+def test_adapt_weighted_inputs_supports_optional_inputs_by_place() -> None:
+    ready = peven.token({"kind": "ready"}, run_key="rk")
+    plan = peven.token({"kind": "plan"}, run_key="rk")
+    hint_1 = peven.token({"hint": 1}, run_key="rk")
+    hint_2 = peven.token({"hint": 2}, run_key="rk")
+
+    assert adapt_weighted_inputs(
+        [ready],
+        input_places=("ready", "plan"),
+        input_weights=(1, 1),
+        input_optional=(False, True),
+        inputs_by_place={"ready": [ready], "plan": []},
+    ) == (ready, None)
+    assert adapt_weighted_inputs(
+        [ready, plan],
+        input_places=("ready", "plan"),
+        input_weights=(1, 1),
+        input_optional=(False, True),
+        inputs_by_place={"ready": [ready], "plan": [plan]},
+    ) == (ready, plan)
+    assert adapt_weighted_inputs(
+        [ready],
+        input_places=("ready", "hint"),
+        input_weights=(1, 2),
+        input_optional=(False, True),
+        inputs_by_place={"ready": [ready], "hint": []},
+    ) == (ready, [])
+    assert adapt_weighted_inputs(
+        [ready, hint_1, hint_2],
+        input_places=("ready", "hint"),
+        input_weights=(1, 2),
+        input_optional=(False, True),
+        inputs_by_place={"ready": [ready], "hint": [hint_1, hint_2]},
+    ) == (ready, [hint_1, hint_2])
+
+    with pytest.raises(ValueError, match="optional input 'hint' provided 1 tokens"):
+        adapt_weighted_inputs(
+            [ready, hint_1],
+            input_places=("ready", "hint"),
+            input_weights=(1, 2),
+            input_optional=(False, True),
+            inputs_by_place={"ready": [ready], "hint": [hint_1]},
+        )
+
+
 def test_normalize_transition_outputs_single_output_requires_concrete_tokens() -> None:
     emission = normalize_transition_outputs(
         [

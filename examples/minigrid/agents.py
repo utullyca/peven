@@ -58,7 +58,7 @@ async def choose_move(
     *,
     obs: dict[str, Any],
     memory: dict[str, Any],
-    plan: dict[str, Any],
+    plan: dict[str, Any] | None,
 ) -> dict[str, str]:
     remaining = int(memory["planner_limit"]) - int(memory["planner_calls"])
     result = await mover.run(
@@ -89,13 +89,19 @@ async def make_plan(
 def _mover_prompt(
     *,
     obs: dict[str, Any],
-    plan: dict[str, Any],
+    plan: dict[str, Any] | None,
     remaining: int,
 ) -> str:
     ahead = _tile_name(_tile_ahead(obs))
     left = _tile_name(_tile_left(obs))
     right = _tile_name(_tile_right(obs))
-    advice = str(plan.get("advice") or "none")
+    advice = None if plan is None else str(plan.get("advice") or "")
+    planner_advice = "" if advice is None else _planner_advice(advice)
+    action_basis = (
+        "live state.\n"
+        if advice is None
+        else "live state or planner advice.\n"
+    )
     return (
         "Choose one MiniGrid action.\n"
         f"Mission: {obs['mission']}\n"
@@ -105,7 +111,7 @@ def _mover_prompt(
         f"tile_right={right}\n"
         f"local_objective={_local_objective(obs)}\n"
         f"planner_calls_remaining={remaining}\n"
-        f"{_planner_advice(advice)}"
+        f"{planner_advice}"
         "DoorKey objective order: get the key, open the closed door, then reach the goal.\n"
         "Available tools: move_forward, turn_left, turn_right, pick_up_key, open_door, ask_planner.\n"
         "Current inventory_key and tile_ahead are authoritative.\n"
@@ -120,7 +126,7 @@ def _mover_prompt(
         "- if tile_ahead=wall or tile_ahead=unseen, turn instead of move_forward.\n"
         "- turn_left and turn_right always rotate in place.\n"
         "- ask_planner spends one planner call and does not move.\n"
-        "Choose an action whose preconditions match the live state or planner advice.\n"
+        f"Choose an action whose preconditions match the {action_basis}"
         f"{_view_notes(obs)}"
         "Current agent view:\n"
         f"{_agent_view_grid(obs['view'])}\n"
@@ -186,8 +192,8 @@ def _planner_advice(advice: str | dict[str, Any]) -> str:
     return f"Planner advice:\n{advice}\n"
 
 
-def _planning_rule(*, advice: str, remaining: int) -> str:
-    if advice.strip().lower() != "none":
+def _planning_rule(*, advice: str | None, remaining: int) -> str:
+    if advice is not None and advice.strip():
         return "Use planner advice only when it matches the live preconditions.\n"
     if remaining > 0:
         return (

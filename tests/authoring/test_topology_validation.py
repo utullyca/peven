@@ -20,6 +20,9 @@ def test_topology_constructors_validate_basic_arguments() -> None:
     with pytest.raises(ValueError, match="input weight must be a positive int"):
         peven.input("ready", weight=0)
 
+    with pytest.raises(TypeError, match="input optional must be a bool"):
+        peven.input("ready", optional="yes")  # type: ignore[arg-type]
+
     with pytest.raises(ValueError, match="place ids must be non-empty strings"):
         peven.output("")
 
@@ -56,7 +59,21 @@ def test_transition_decorator_treats_bare_string_inputs_outputs_as_single_declar
     declaration = peven.transition(inputs="ready", outputs="done", executor="judge")
 
     assert [input_decl.place for input_decl in declaration.inputs] == ["ready"]
+    assert [input_decl.optional for input_decl in declaration.inputs] == [False]
     assert [output_decl.place for output_decl in declaration.outputs] == ["done"]
+
+
+def test_input_constructor_supports_optional_arcs() -> None:
+    declaration = peven.transition(
+        inputs=["ready", peven.input("plan", optional=True)],
+        outputs="done",
+        executor="judge",
+    )
+
+    assert [(arc.place, arc.weight, arc.optional) for arc in declaration.inputs] == [
+        ("ready", 1, False),
+        ("plan", 1, True),
+    ]
 
 
 def test_transition_decorator_allows_duplicate_output_places_to_reach_adapter_boundary() -> None:

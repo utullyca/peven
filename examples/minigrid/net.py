@@ -19,10 +19,10 @@ import peven
 
 
 @peven.executor("minigrid_mover")
-async def mover_executor(ctx, move_request, obs, memory, plan):
+async def mover_executor(ctx, move_request, obs, memory, plan=None):
     """Ask the small mover model for one action or a planner call."""
     memory_payload = memory.payload
-    plan_payload = plan.payload
+    plan_payload = None if plan is None else plan.payload
     turn = move_request.payload["turn"]
     decision = await choose_move(
         ctx,
@@ -45,7 +45,7 @@ async def mover_executor(ctx, move_request, obs, memory, plan):
                 "plan_request": [],
                 "obs": ctx.token(obs.payload),
                 "memory": ctx.token(memory_payload),
-                "plan": ctx.token(plan_payload),
+                "plan": [],
             }
         # Asking the planner is exclusive with moving: no action token is emitted.
         return {
@@ -53,7 +53,7 @@ async def mover_executor(ctx, move_request, obs, memory, plan):
             "plan_request": ctx.token(
                 {
                     "turn": turn,
-                    "version": plan_payload["version"] + 1,
+                    "version": memory_payload["planner_calls"] + 1,
                     "reason": "ask_planner",
                 }
             ),
@@ -67,7 +67,7 @@ async def mover_executor(ctx, move_request, obs, memory, plan):
         "plan_request": [],
         "obs": ctx.token(obs.payload),
         "memory": ctx.token(memory_payload),
-        "plan": ctx.token({"advice": "none", "version": plan_payload["version"]}),
+        "plan": [],
     }
 
 
@@ -174,17 +174,11 @@ class DoorKeyEnv(peven.Env):
                     "planner_limit": 2,
                 }
             ],
-            plan=[
-                {
-                    "advice": "none",
-                    "version": 0,
-                }
-            ],
             move_request=[{"turn": 0}],
         )
 
     mover = peven.transition(
-        inputs=["move_request", "obs", "memory", "plan"],
+        inputs=["move_request", "obs", "memory", peven.input("plan", optional=True)],
         outputs=["action", "plan_request", "obs", "memory", "plan"],
         executor="minigrid_mover",
     )

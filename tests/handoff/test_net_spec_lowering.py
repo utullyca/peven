@@ -31,6 +31,10 @@ async def handoff_writer(ctx, prompt):
 @peven.executor("handoff_joiner")
 async def handoff_joiner(ctx, left, right):
     return {"done": peven.token({"ok": True}, run_key=ctx.bundle.run_key)}
+
+@peven.executor("handoff_optional")
+async def handoff_optional(ctx, ready, plan=None):
+    return peven.token({"ok": True}, run_key=ctx.bundle.run_key)
 """,
     namespace,
 )
@@ -69,6 +73,19 @@ class GuardedHandoff(peven.Env):
     )
 
 
+@peven.env("optional_handoff")
+class OptionalHandoff(peven.Env):
+    ready = peven.place()
+    plan = peven.place()
+    done = peven.place()
+
+    finish = peven.transition(
+        inputs=["ready", peven.input("plan", optional=True)],
+        outputs=["done"],
+        executor="handoff_optional",
+    )
+
+
 def test_package_env_spec_produces_authored_ir_payload() -> None:
     lowered = package_env_spec(HandoffDemo.spec())
 
@@ -85,7 +102,7 @@ def test_package_env_spec_produces_authored_ir_payload() -> None:
             TransitionSpecMessage(
                 id="write",
                 executor="handoff_writer",
-                inputs=[InputArcSpecMessage(place="prompt", weight=2)],
+                inputs=[InputArcSpecMessage(place="prompt", weight=2, optional=False)],
                 outputs=[OutputArcSpecMessage(place="ready")],
                 guard_spec=None,
                 retries=2,
@@ -111,6 +128,21 @@ def test_package_env_spec_produces_authored_ir_payload() -> None:
             ),
         ],
     )
+
+
+def test_package_env_spec_preserves_optional_input_arcs() -> None:
+    lowered = package_env_spec(OptionalHandoff.spec())
+
+    assert lowered.transitions[0].inputs == [
+        InputArcSpecMessage(place="ready", weight=1, optional=False),
+        InputArcSpecMessage(place="plan", weight=1, optional=True),
+    ]
+
+    decoded = msgspec.msgpack.decode(
+        msgspec.msgpack.encode(lowered),
+        type=EnvSpecMessage,
+    )
+    assert decoded.transitions[0].inputs[1].optional is True
 
 
 def test_package_env_spec_passes_guard_specs_through_unchanged() -> None:
@@ -281,6 +313,19 @@ def test_authored_ir_shape_validators_reject_bad_transport_shapes() -> None:
                 id="finish",
                 executor="writer",
                 inputs=[SimpleNamespace(place="ready", weight=0)],
+                outputs=[],
+                retries=0,
+                guard_spec=None,
+                join_by_spec=None,
+            )
+        )
+
+    with pytest.raises(TypeError, match="input arc optional must be a bool"):
+        lowering_module._validate_transition_spec_message(
+            SimpleNamespace(
+                id="finish",
+                executor="writer",
+                inputs=[SimpleNamespace(place="ready", weight=1, optional="yes")],
                 outputs=[],
                 retries=0,
                 guard_spec=None,

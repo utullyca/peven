@@ -76,6 +76,15 @@ def test_mover_prompt_uses_observation_not_global_pose() -> None:
     assert "Memory map:" not in prompt
 
 
+def test_mover_prompt_omits_planner_advice_when_optional_plan_is_absent() -> None:
+    prompt = _mover_prompt(obs=_obs(), plan=None, remaining=1)
+
+    assert "Planner advice:" not in prompt
+    assert "Planner advice:\nnone" not in prompt
+    assert "live state.\n" in prompt
+    assert "live state or planner advice" not in prompt
+
+
 def test_planner_prompt_does_not_receive_global_pose() -> None:
     prompt = _planner_prompt(
         obs=_obs(),

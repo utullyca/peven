@@ -23,8 +23,18 @@ def adapt_weighted_inputs(
     tokens: Sequence[Token],
     *,
     input_weights: tuple[int, ...],
-) -> tuple[Token | list[Token], ...]:
+    input_places: tuple[str, ...] = (),
+    input_optional: tuple[bool, ...] = (),
+    inputs_by_place: dict[str, list[Token]] | None = None,
+) -> tuple[Token | list[Token] | None, ...]:
     """Slice one reserved token vector into executor arguments by authored weights."""
+    if input_optional and any(input_optional):
+        return _adapt_optional_inputs(
+            input_places=input_places,
+            input_weights=input_weights,
+            input_optional=input_optional,
+            inputs_by_place=inputs_by_place,
+        )
     expected = sum(input_weights)
     if len(tokens) != expected:
         raise ValueError(
@@ -38,6 +48,38 @@ def adapt_weighted_inputs(
         else:
             args.append(list(tokens[cursor : cursor + weight]))
         cursor += weight
+    return tuple(args)
+
+
+def _adapt_optional_inputs(
+    *,
+    input_places: tuple[str, ...],
+    input_weights: tuple[int, ...],
+    input_optional: tuple[bool, ...],
+    inputs_by_place: dict[str, list[Token]] | None,
+) -> tuple[Token | list[Token] | None, ...]:
+    if not (len(input_places) == len(input_weights) == len(input_optional)):
+        raise ValueError("authored input metadata must have matching lengths")
+    if inputs_by_place is None:
+        raise ValueError("optional input adaptation requires inputs_by_place")
+
+    args: list[Token | list[Token] | None] = []
+    for place, weight, optional in zip(
+        input_places,
+        input_weights,
+        input_optional,
+        strict=True,
+    ):
+        bucket = inputs_by_place.get(place, [])
+        if not bucket and optional:
+            args.append(None if weight == 1 else [])
+            continue
+        if len(bucket) != weight:
+            kind = "optional" if optional else "required"
+            raise ValueError(
+                f"{kind} input {place!r} provided {len(bucket)} tokens for weight {weight}"
+            )
+        args.append(bucket[0] if weight == 1 else list(bucket))
     return tuple(args)
 
 
@@ -114,7 +156,13 @@ async def invoke_transition(
         inputs_by_place=inputs_by_place,
         sink=sink,
     )
-    args = adapt_weighted_inputs(tokens, input_weights=binding.input_weights)
+    args = adapt_weighted_inputs(
+        tokens,
+        input_places=binding.input_places,
+        input_weights=binding.input_weights,
+        input_optional=binding.input_optional,
+        inputs_by_place=inputs_by_place,
+    )
     result = await binding.executor_spec.fn(ctx, *args)
     return normalize_transition_outputs(
         result,

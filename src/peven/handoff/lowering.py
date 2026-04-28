@@ -44,6 +44,7 @@ class InputArcSpecMessage(msgspec.Struct, frozen=True):
 
     place: str
     weight: int = 1
+    optional: bool = False
 
 
 class OutputArcSpecMessage(msgspec.Struct, frozen=True):
@@ -80,7 +81,9 @@ class TransitionBinding:
     transition_id: str
     executor_name: str
     executor_spec: ExecutorSpec
+    input_places: tuple[str, ...]
     input_weights: tuple[int, ...]
+    input_optional: tuple[bool, ...]
     output_places: tuple[str, ...]
 
 
@@ -111,7 +114,11 @@ def package_env_spec(spec: EnvSpec) -> EnvSpecMessage:
                 id=transition.id,
                 executor=transition.executor,
                 inputs=[
-                    InputArcSpecMessage(place=arc.place, weight=arc.weight)
+                    InputArcSpecMessage(
+                        place=arc.place,
+                        weight=arc.weight,
+                        optional=arc.optional,
+                    )
                     for arc in transition.inputs
                 ],
                 outputs=[
@@ -162,7 +169,9 @@ def compile_env(spec: EnvSpec) -> CompiledEnv:
             transition_id=transition.id,
             executor_name=transition.executor,
             executor_spec=executor_spec,
+            input_places=tuple(arc.place for arc in callback_inputs),
             input_weights=tuple(arc.weight for arc in callback_inputs),
+            input_optional=tuple(arc.optional for arc in callback_inputs),
             output_places=tuple(arc.place for arc in transition.outputs),
         )
 
@@ -226,6 +235,8 @@ def _validate_transition_spec_message(transition: TransitionSpecMessage) -> None
             raise TypeError("authored input arc place must be a non-empty string")
         if type(arc.weight) is not int or arc.weight <= 0:
             raise ValueError("authored input arc weight must be a positive int")
+        if type(getattr(arc, "optional", False)) is not bool:
+            raise TypeError("authored input arc optional must be a bool")
     for arc in transition.outputs:
         if type(arc.place) is not str or not arc.place:
             raise TypeError("authored output arc place must be a non-empty string")

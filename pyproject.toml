@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "peven"
-version = "0.2.1"
+version = "0.2.2"
 description = "Python authoring for structured LLM environments powered by a Julia Petri-net runtime"
 readme = "README.md"
 license = "Apache-2.0"

@@ -113,6 +113,12 @@ complete. The Julia engine still reports the real Petri-net condition; Python
 normalizes `no_enabled_transition` into a completed `RunResult` only when a
 terminal place contains a token.
 
+Use `peven.input("place", optional=True)` when a transition should fire from
+its required inputs and receive `None` when that optional place is absent. This
+maps directly to `ArcFrom(...; optional=true)` in `Peven.jl`. Optional arcs must
+not be used on keyed joins, and a transition still needs at least one required
+input.
+
 ## Why Julia
 
 The Julia side is not there for novelty. It keeps the engine closer to the real Petri-net model.
@@ -139,6 +145,15 @@ The repo examples are intentionally small but representative:
 - `examples/minigrid/` — MiniGrid DoorKey with a mover, planner, fog memory, and terminal scoring
 
 ## Release notes
+
+### 0.2.2
+
+- Added optional input arcs via `peven.input(..., optional=True)`.
+- Updated the MiniGrid DoorKey example so planner advice is an optional token,
+  not a sentinel `{"advice": "none"}` token.
+- Updated the packaged Julia runtime pins for optional-arc support.
+- Added adapter parity coverage for optional inputs, optional-only rejection,
+  and optional keyed-join rejection.
 
 ### 0.2.1
 

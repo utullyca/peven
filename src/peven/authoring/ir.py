@@ -33,6 +33,7 @@ class InputArcSpec:
 
     place: str
     weight: int = 1
+    optional: bool = False
 
 
 @dataclass(frozen=True, slots=True)

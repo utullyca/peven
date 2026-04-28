@@ -4,6 +4,12 @@ Peven is Python authoring for structured LLM environments backed by a Julia Petr
 
 If PydanticAI makes it easy to build agents, Peven makes it easy to build the environment around them: places, transitions, joins, guards, retries, and the topology you want to evaluate.
 
+## Interactive examples
+
+A MiniGrid DoorKey rollout with the Petri net execution trace is shown here:
+
+[View the Peven MiniGrid demo](https://www.sekaitc.me/peven)
+
 ## Why use it
 
 - Author environments in Python, next to the agents and tools you already write.

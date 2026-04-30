@@ -46,10 +46,18 @@ uv run peven-install
 or
 
 ```bash
-uv run peven install-runtime
+uv run peven install-runtime --verbose
 ```
 
-If you skip that step, the first `Env.run()` will do the same provisioning automatically.
+To check the Python-to-Julia runtime wiring, run:
+
+```bash
+uv run peven doctor
+```
+
+A healthy install prints the resolved Julia executable, Julia project, Julia version, and `doctor_ok`. If setup fails, rerun with `peven install-runtime --verbose` and include that output in the bug report.
+
+If you skip explicit setup, the first `Env.run()` will do the same provisioning automatically.
 
 
 ## Quickstart

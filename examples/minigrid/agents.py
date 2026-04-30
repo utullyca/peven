@@ -5,12 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from examples.minigrid.tools import ACTION_OUTPUTS, action_kind
+from peven.integrations.pydantic_ai import event_stream_handler
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.ollama import OllamaProvider
-
-from peven.integrations.pydantic_ai import event_stream_handler
-
 
 mover = Agent(
     OpenAIChatModel(
@@ -98,9 +96,7 @@ def _mover_prompt(
     advice = None if plan is None else str(plan.get("advice") or "")
     planner_advice = "" if advice is None else _planner_advice(advice)
     action_basis = (
-        "live state.\n"
-        if advice is None
-        else "live state or planner advice.\n"
+        "live state.\n" if advice is None else "live state or planner advice.\n"
     )
     return (
         "Choose one MiniGrid action.\n"

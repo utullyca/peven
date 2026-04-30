@@ -17,6 +17,10 @@ A MiniGrid DoorKey rollout with the Petri net execution trace is shown here:
 - Run the hard state-machine part on a Julia engine built for Petri nets and concurrent firing.
 - Compare workflows: single-shot, judge loops, keyed joins, guarded retries, branch-and-merge topologies.
 
+## When not to use it
+
+Peven is probably overkill for a single prompt, a linear chain, or an agent loop that is easier to read as ordinary Python. It starts to pay for itself when the environment has real topology: branching, joins, guards, retries, traces, or reproducible state you want to inspect and compare.
+
 ## Install
 
 First install the Python package:

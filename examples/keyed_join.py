@@ -1,5 +1,14 @@
-"""Tee each prompt into two branches, then keyed-join their answers by case_id."""
+"""Branch each task to two models, then keyed-join their answers by case_id.
 
+Run with:
+
+    uv run python -m examples.keyed_join
+
+The output is one JSON object keyed by ``case_id``. Each value contains the
+same question answered by the fast and full branches.
+"""
+
+import json
 import time
 
 from pydantic_ai import Agent
@@ -131,6 +140,15 @@ class KeyedJoinEnv(peven.Env):
     )
 
 
-def run_keyed_join(*, command: tuple[str, ...]) -> dict[str, dict]:
+def run_keyed_join(*, command: tuple[str, ...] | None = None) -> dict[str, dict]:
     result = KeyedJoinEnv().run(command=command)
     return {token.payload["case_id"]: token.payload for token in result.final_marking["merged"]}
+
+
+def main() -> None:
+    report = run_keyed_join()
+    print(json.dumps(report, indent=2, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

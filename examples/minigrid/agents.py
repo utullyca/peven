@@ -5,10 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from examples.minigrid.tools import ACTION_OUTPUTS, action_kind
-from peven.integrations.pydantic_ai import event_stream_handler
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.ollama import OllamaProvider
+
+from peven.integrations.pydantic_ai import event_stream_handler
+
 
 mover = Agent(
     OpenAIChatModel(

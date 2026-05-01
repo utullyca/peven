@@ -137,6 +137,27 @@ maps directly to `ArcFrom(...; optional=true)` in `Peven.jl`. Optional arcs must
 not be used on keyed joins, and a transition still needs at least one required
 input.
 
+## Tracing runs
+
+Peven can stream the run as it happens. `RichSink` renders a live terminal trace
+of run start/finish events, transition firings, retries, failures, guard errors,
+timings, and final marking. `JSONLSink` writes the same event stream as one JSON
+record per line for later inspection.
+
+```python
+sink = peven.CompositeSink(
+    peven.RichSink(show_payloads=True),
+    peven.JSONLSink("runs/trace.jsonl"),
+)
+
+result = SingleQuestionEnv().run(sink=sink)
+```
+
+Executors can add local trace records with `ctx.trace(...)`. When using
+PydanticAI, pass `peven.integrations.pydantic_ai.event_stream_handler(ctx, ...)`
+to an agent run to include model/tool stream events in the same sink. See
+`examples/trace.py` for a small tool-and-judge trace with `fuse` support.
+
 ## Why Julia
 
 The Julia side is not there for novelty. It keeps the engine closer to the real Petri-net model.

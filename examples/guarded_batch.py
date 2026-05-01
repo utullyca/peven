@@ -1,5 +1,15 @@
-"""Batch two prompt tokens into one guarded retrying Ollama call."""
+"""Guard and retry one batched model call.
 
+Run with:
+
+    uv run python -m examples.guarded_batch
+
+This example keeps the topology intentionally small: a non-empty batch guard
+decides whether the transition can fire, and ``retries=1`` retries the first
+executor failure.
+"""
+
+import json
 import time
 
 from pydantic_ai import Agent
@@ -93,5 +103,14 @@ class GuardedBatchEnv(peven.Env):
     )
 
 
-def run_guarded_batch(*, command: tuple[str, ...]) -> dict[str, object]:
+def run_guarded_batch(*, command: tuple[str, ...] | None = None) -> dict[str, object]:
     return GuardedBatchEnv().run(command=command).final_marking["report"][0].payload
+
+
+def main() -> None:
+    report = run_guarded_batch()
+    print(json.dumps(report, indent=2, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

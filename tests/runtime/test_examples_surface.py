@@ -54,6 +54,13 @@ def test_examples_do_not_import_private_runtime_bridge_runner() -> None:
         assert "import peven.runtime.bridge as bridge_module" not in source
 
 
+def test_small_examples_expose_runnable_module_entrypoints() -> None:
+    for module_name in ("examples.guarded_batch", "examples.keyed_join"):
+        module = importlib.import_module(module_name)
+
+        assert callable(module.main)
+
+
 def test_runtime_bridge_private_runner_alias_is_removed() -> None:
     assert not hasattr(bridge_module, "_run_until_terminal_result")
     assert not hasattr(bridge_module, "dispatch_transition_callback")
